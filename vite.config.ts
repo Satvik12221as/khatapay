@@ -9,3 +9,5 @@ export default defineConfig({
     },
   },
 });
+
+// In production, the browser talks to our server (3000). The server serves the built web assets and handles API calls.
