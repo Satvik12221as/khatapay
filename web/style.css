@@ -78,3 +78,16 @@ button:focus-visible { outline: 3px solid #5b7bff; outline-offset: 2px; }
 .sheet-actions .pay { flex: 1; }
 
 @media (prefers-reduced-motion: no-preference) { .key { transition: transform 60ms ease; } }
+
+
+/* ---- Result screen ---- */
+.view[hidden] { display: none; }
+.view:not(.status) { display: flex; flex-direction: column; gap: 14px; }
+.status { background: var(--paper); border: 1px solid var(--line); border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 10px; }
+.status h2 { margin: 0; font-size: 22px; }
+.badge { align-self: flex-start; padding: 4px 12px; border-radius: 999px; font-size: 13px; font-weight: 700; background: #ffe0dd; color: var(--bad); }
+.badge[data-kind="paid"] { background: #d6f2e4; color: #0b5d3b; }
+.badge[data-kind="cancelled"] { background: #e3e7ef; color: var(--muted); }
+.facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 6px 0 4px; font-size: 13px; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; font-family: ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }

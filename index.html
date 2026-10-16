@@ -13,43 +13,55 @@
       <h1 class="shop-name" id="shopName">Shop</h1>
     </header>
 
-    <section class="tape" aria-label="Your bill">
-      <div class="tape-head">
-        <span class="tape-title">Your bill</span>
-        <button class="link" id="clear" type="button">Clear</button>
-      </div>
-      <div class="display" id="display" aria-live="polite">0</div>
-      <ol class="lines" id="lines"></ol>
-      <div class="total-row">
-        <span>Total</span>
-        <strong id="total">-</strong>
-      </div>
-      <p class="msg" id="msg" role="status"></p>
+    <div id="keypadView" class="view">
+      <section class="tape" aria-label="Your bill">
+        <div class="tape-head">
+          <span class="tape-title">Your bill</span>
+          <button class="link" id="clear" type="button">Clear</button>
+        </div>
+        <div class="display" id="display" aria-live="polite">0</div>
+        <ol class="lines" id="lines"></ol>
+        <div class="total-row">
+          <span>Total</span>
+          <strong id="total">-</strong>
+        </div>
+        <p class="msg" id="msg" role="status"></p>
+      </section>
+
+      <section class="pad" id="pad" aria-label="Keypad">
+        <button class="key" data-key="7">7</button>
+        <button class="key" data-key="8">8</button>
+        <button class="key" data-key="9">9</button>
+        <button class="key op" data-key="÷" aria-label="divide">÷</button>
+
+        <button class="key" data-key="4">4</button>
+        <button class="key" data-key="5">5</button>
+        <button class="key" data-key="6">6</button>
+        <button class="key op" data-key="×" aria-label="multiply">×</button>
+
+        <button class="key" data-key="1">1</button>
+        <button class="key" data-key="2">2</button>
+        <button class="key" data-key="3">3</button>
+        <button class="key op" data-key="-" aria-label="subtract">−</button>
+
+        <button class="key" data-key=".">.</button>
+        <button class="key" data-key="0">0</button>
+        <button class="key" data-key="back" aria-label="backspace">⌫</button>
+        <button class="key op" data-key="+" aria-label="add">+</button>
+      </section>
+
+      <button class="pay" id="pay" type="button" disabled>Pay</button>
+    </div>
+
+    <section id="statusView" class="view status" hidden aria-live="polite">
+      <div class="badge" id="badge"></div>
+      <h2 id="statusTitle"></h2>
+      <p class="sheet-shop" id="statusSub"></p>
+      <ol class="lines" id="statusLines"></ol>
+      <div class="total-row"><span>Total</span><strong id="statusTotal"></strong></div>
+      <dl class="facts" id="facts"></dl>
+      <button class="pay" id="again" type="button">New payment</button>
     </section>
-
-    <section class="pad" id="pad" aria-label="Keypad">
-      <button class="key" data-key="7">7</button>
-      <button class="key" data-key="8">8</button>
-      <button class="key" data-key="9">9</button>
-      <button class="key op" data-key="÷" aria-label="divide">÷</button>
-
-      <button class="key" data-key="4">4</button>
-      <button class="key" data-key="5">5</button>
-      <button class="key" data-key="6">6</button>
-      <button class="key op" data-key="×" aria-label="multiply">×</button>
-
-      <button class="key" data-key="1">1</button>
-      <button class="key" data-key="2">2</button>
-      <button class="key" data-key="3">3</button>
-      <button class="key op" data-key="-" aria-label="subtract">−</button>
-
-      <button class="key" data-key=".">.</button>
-      <button class="key" data-key="0">0</button>
-      <button class="key" data-key="back" aria-label="backspace">⌫</button>
-      <button class="key op" data-key="+" aria-label="add">+</button>
-    </section>
-
-    <button class="pay" id="pay" type="button" disabled>Pay</button>
   </main>
 
   <dialog id="sheet" class="sheet">
@@ -58,6 +70,7 @@
     <ol class="lines" id="sheetLines"></ol>
     <div class="total-row"><span>Total</span><strong id="sheetTotal"></strong></div>
     <p class="warn" id="sheetWarn" hidden></p>
+    <p class="warn" id="sheetErr" hidden></p>
     <div class="sheet-actions">
       <button class="ghost" id="cancel" type="button">Cancel</button>
       <button class="pay" id="confirm" type="button">Confirm and pay</button>
