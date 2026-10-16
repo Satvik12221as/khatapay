@@ -63,3 +63,5 @@ describe("payment API (mock PayPal)", () => {
     expect((await app.inject({ url: `/api/payments/${j.paymentId}` })).json().state).toBe("CANCELLED");
   });
 });
+
+
