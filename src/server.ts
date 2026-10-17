@@ -8,15 +8,20 @@ import { tapeHash } from "./payments/tape";
 import { PaymentStore } from "./payments/store";
 import { MERCHANTS } from "./merchants";
 import { makePayPal, PayPalError, type PayPal } from "./paypal/client";
+import { makeBrain, type Brain } from "./haggle/brains";
+import { negotiate, discountKeys } from "./haggle/haggle";
 
 const CURRENCY = "USD";
 const MAX_PAYMENT_CENTS = 100_000; // 1,000.00 hard cap for now (guardrails grow in Phase 4)
 
-export function buildApp(env: Record<string, string | undefined> = process.env, paypal?: PayPal) {
+export function buildApp(env: Record<string, string | undefined> = process.env, paypal?: PayPal, brainOverride?: Brain) {
   const app = Fastify({ logger: env.NODE_ENV !== "test" });
   const pp = paypal ?? makePayPal(env);
   const store = new PaymentStore();
   const publicUrl = env.PUBLIC_URL ?? "http://localhost:5173";
+  const brain = brainOverride ?? makeBrain(env, (e) => app.log.warn({ err: String(e) }, "Gemini failed, using offline agents"));
+  const haggleLog: number[] = [];
+  const haggleMax = Number(env.HAGGLE_MAX_PER_HOUR ?? 60);
 
   const merchant = (id: string) => {
     const m = MERCHANTS.find((x) => x.id === id);
@@ -104,7 +109,24 @@ export function buildApp(env: Record<string, string | undefined> = process.env, 
     if (!p) return reply.code(404).send({ error: "NOT_FOUND", message: "Unknown payment" });
     return p;
   });
+    /** Two AI agents negotiate a discount. They only propose; the referee limits them; the human approves. */
+  app.post("/api/haggle", async (req, reply) => {
+    const body = z.object({ merchantId: z.string(), keys: z.array(z.enum(ALL_KEYS)).max(300) }).parse(req.body);
+    const m = merchant(body.merchantId);
+    const view = replay(body.keys);
+    if (!view.canPay || view.totalCents === null) return reply.code(422).send({ error: "NOT_PAYABLE", message: "Enter a complete sum first" });
+    if (view.totalCents < 100) return reply.code(422).send({ error: "TOO_SMALL", message: "Bill is too small to negotiate" });
+    const now = Date.now();
+    while (haggleLog.length && now - haggleLog[0] > 3_600_000) haggleLog.shift();
+    if (haggleLog.length >= haggleMax) return reply.code(429).send({ error: "RATE_LIMIT", message: "Too many negotiations, try again later" });
+    haggleLog.push(now);
 
+    const out = await negotiate({ brain, merchantName: m.name, totalCents: view.totalCents, policy: { maxDiscountPct: m.maxDiscountPct, minTotalCents: 100 }, loyalty: m.loyalty });
+    const finalKeys = [...body.keys, ...discountKeys(out.finalDiscountCents)];
+    const after = replay(finalKeys);
+    if (after.totalCents !== view.totalCents - out.finalDiscountCents) throw new Error("Haggle result did not match the keypad");
+    return { ...out, keys: finalKeys, totalBeforeCents: view.totalCents, totalAfterCents: after.totalCents };
+  });
   return { app, store, pp };
 }
 

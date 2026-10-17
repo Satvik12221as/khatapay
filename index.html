@@ -51,6 +51,7 @@
       </section>
 
       <button class="pay" id="pay" type="button" disabled>Pay</button>
+      <button class="ghost" id="haggle" type="button" disabled>Haggle with AI</button>
     </div>
 
     <section id="statusView" class="view status" hidden aria-live="polite">
@@ -74,6 +75,16 @@
     <div class="sheet-actions">
       <button class="ghost" id="cancel" type="button">Cancel</button>
       <button class="pay" id="confirm" type="button">Confirm and pay</button>
+    </div>
+  </dialog>
+    <dialog id="haggleSheet" class="sheet">
+    <h2>Haggle</h2>
+    <p class="sheet-shop">Your agent and the shop's agent negotiate. You approve the result.</p>
+    <ol class="chat" id="chat"></ol>
+    <p class="warn" id="haggleErr" hidden></p>
+    <div class="sheet-actions">
+      <button class="ghost" id="haggleNo" type="button">No thanks</button>
+      <button class="pay" id="haggleYes" type="button" disabled>Apply</button>
     </div>
   </dialog>
 

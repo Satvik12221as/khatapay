@@ -14,7 +14,8 @@
   "web": "vite",
   "build": "vite build",
   "preview": "vite preview",
-  "spike": "tsx --env-file-if-exists=.env scripts/paypal-spike.ts"
+  "spike": "tsx --env-file-if-exists=.env scripts/paypal-spike.ts",
+  "gemini" : "tsx --env-file-if-exists=.env scripts/gemini-check.ts"
 },
   "dependencies": {
     "fastify": "^5.12.5",
