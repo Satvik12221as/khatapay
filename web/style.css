@@ -91,3 +91,17 @@ button:focus-visible { outline: 3px solid #5b7bff; outline-offset: 2px; }
 .facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 6px 0 4px; font-size: 13px; }
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; font-family: ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+
+
+/* ---- Haggle chat ---- */
+.chat { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; max-height: 52vh; overflow-y: auto; }
+.bubble { border-radius: 14px; padding: 10px 12px; max-width: 92%; border: 1px solid var(--line); background: var(--key); }
+.bubble.customer { align-self: flex-start; }
+.bubble.shop { align-self: flex-end; background: #eef1fb; border-color: #cfd6f0; }
+.bubble p { margin: 4px 0 0; font-size: 14px; }
+.bubble-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; }
+.chip { background: var(--op); color: var(--op-ink); border-radius: 999px; padding: 1px 8px; font-weight: 700; }
+.src { margin-left: auto; color: var(--muted); font-size: 11px; }
+.ref { color: var(--muted); font-style: italic; font-size: 12px !important; }
+.thinking { color: var(--muted); font-size: 14px; }
+@media (prefers-reduced-motion: no-preference) { .bubble { animation: pop 200ms ease-out; } @keyframes pop { from { opacity: 0; transform: translateY(6px); } } }
