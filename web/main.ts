@@ -58,6 +58,10 @@ function render(v: View) {
   if (v.error) msgEl.textContent = v.error;
   else if (v.totalCents !== null && v.totalCents <= 0) msgEl.textContent = "Total must be above zero.";
   else msgEl.textContent = "";
+    if (v.error) msgEl.textContent = v.error;
+  else if (v.totalCents !== null && v.totalCents <= 0) msgEl.textContent = "Total must be above zero.";
+  else msgEl.textContent = "";
+  updateHaggle();
 }
 
 function press(k: Key) {
@@ -120,6 +124,90 @@ confirmBtn.addEventListener("click", async () => {
     confirmBtn.textContent = "Confirm and pay";
   }
 });
+
+// ---- Haggle: two AI agents negotiate a discount on your tape ----
+interface Turn { side: "customer" | "shop"; accept: boolean; discountCents: number; message: string; source: "gemini" | "scripted"; note?: string }
+interface HaggleResult { turns: Turn[]; finalDiscountCents: number; agreed: boolean; keys: Key[]; totalBeforeCents: number; totalAfterCents: number }
+
+const haggleBtn = el<HTMLButtonElement>("haggle");
+const haggleSheet = el<HTMLDialogElement>("haggleSheet");
+const chat = el<HTMLOListElement>("chat");
+const haggleErr = el<HTMLParagraphElement>("haggleErr");
+const haggleYes = el<HTMLButtonElement>("haggleYes");
+let haggleResult: HaggleResult | null = null;
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+function updateHaggle() {
+  haggleBtn.disabled = !(current.canPay && (current.totalCents ?? 0) >= 100);
+}
+
+function addBubble(t: Turn) {
+  const li = document.createElement("li");
+  li.className = `bubble ${t.side}`;
+  const head = document.createElement("div");
+  head.className = "bubble-head";
+  const who = document.createElement("strong");
+  who.textContent = t.side === "customer" ? "Your agent" : "Shop's agent";
+  const chip = document.createElement("span");
+  chip.className = "chip";
+  const amt = `-${CURRENCY}${formatMoney(t.discountCents)}`;
+  chip.textContent = t.accept ? `agrees ${amt}` : `${t.side === "customer" ? "asks" : "offers"} ${amt}`;
+  const src = document.createElement("span");
+  src.className = "src";
+  src.textContent = t.source === "gemini" ? "Gemini" : "offline";
+  head.append(who, chip, src);
+  const msg = document.createElement("p");
+  msg.textContent = t.message;
+  li.append(head, msg);
+  if (t.note) { const n = document.createElement("p"); n.className = "ref"; n.textContent = t.note; li.append(n); }
+  chat.append(li);
+  li.scrollIntoView({ block: "nearest" });
+}
+
+haggleBtn.addEventListener("click", async () => {
+  chat.replaceChildren();
+  haggleErr.hidden = true;
+  haggleYes.disabled = true;
+  haggleYes.textContent = "Apply";
+  haggleResult = null;
+  haggleSheet.showModal();
+  const wait = document.createElement("li");
+  wait.className = "thinking";
+  wait.textContent = "The agents are talking...";
+  chat.append(wait);
+  try {
+    const r = await fetch("/api/haggle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ merchantId: SHOP.id, keys: sent }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.message || "Haggle failed");
+    wait.remove();
+    for (const t of j.turns as Turn[]) { addBubble(t); await sleep(800); }
+    haggleResult = j as HaggleResult;
+    const d = formatMoney(haggleResult.finalDiscountCents);
+    haggleYes.textContent = haggleResult.finalDiscountCents > 0 ? `${haggleResult.agreed ? "Apply" : "Take final offer"} -${CURRENCY}${d}` : "No discount";
+    haggleYes.disabled = haggleResult.finalDiscountCents <= 0;
+  } catch (e) {
+    wait.remove();
+    const m = (e as Error).message;
+    haggleErr.textContent = m === "Failed to fetch" ? "Cannot reach the server. Is `npm run dev` running?" : m;
+    haggleErr.hidden = false;
+  }
+});
+el<HTMLButtonElement>("haggleNo").addEventListener("click", () => haggleSheet.close());
+
+// The agents "press the keys": we replay the extra keys onto your keypad one by one.
+haggleYes.addEventListener("click", async () => {
+  const r = haggleResult;
+  if (!r) return;
+  haggleSheet.close();
+  const samePrefix = sent.every((k, i) => r.keys[i] === k);
+  if (!samePrefix) press("clear");
+  for (const k of r.keys.slice(samePrefix ? sent.length : 0)) { press(k); await sleep(180); }
+});
+
 
 // ---- Result screen after PayPal sends the customer back ----
 async function showResult(kind: "paid" | "failed" | "cancelled", id: string) {
