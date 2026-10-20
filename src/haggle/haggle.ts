@@ -27,7 +27,7 @@ export async function negotiate(a: {
   const turns: Turn[] = [];
   const ctx = (o: Pick<Ctx, "side" | "round" | "askCents" | "counterCents">): Ctx => ({ ...base, ...o });
 
-  // Round 1: customer asks.
+  // Round 1: customer asks
   const c1 = await a.brain.decide(ctx({ side: "customer", round: 1, askCents: null, counterCents: null }));
   const ask1 = clamp(c1.discountCents, 0, customerMax);
   turns.push({ side: "customer", accept: false, discountCents: ask1, message: c1.message, source: c1.source, ...(ask1 !== c1.discountCents ? { note: "Referee: ask reduced to a sane range." } : {}) });
