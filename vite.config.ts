@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 
-// In dev, the browser talks to Vite (5173). Vite forwards API calls to our server (3000).
+// In dev, the browser talks to Vite (5173). Vite forwards API calls to our server (3000)
 export default defineConfig({
   server: {
     proxy: {
