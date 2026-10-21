@@ -133,3 +133,4 @@ describe("POST /api/haggle", () => {
     expect((await haggle(app, { merchantId: "shop1", keys: K("50") })).statusCode).toBe(429);
   });
 });
+//haggle test file is complete and tests negotiation logic, discount keys, cap calculations, and API endpoints for haggle functionality.  
