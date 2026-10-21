@@ -2,4 +2,5 @@ node_modules
 .env
 *.db
 dist
+data
 # Logs
