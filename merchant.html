@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>KhataPay Shop</title>
+  <link rel="stylesheet" href="/web/style.css">
+</head>
+<body class="wide">
+  <main class="app">
+    <header class="top">
+      <span class="shop-sub">Shop owner view</span>
+      <h1 class="shop-name">Incoming payments</h1>
+      <a class="link-inline" href="/">Open the customer keypad</a>
+    </header>
+    <p class="msg" id="mMsg" role="status"></p>
+    <ol class="cards" id="list"></ol>
+  </main>
+  <script type="module" src="/web/merchant.ts"></script>
+</body>
+</html>

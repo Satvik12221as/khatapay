@@ -6,22 +6,38 @@ import { fatFingerCheck } from "./keypad/keypad";
 import { ALL_KEYS, replay } from "./payments/replay";
 import { tapeHash } from "./payments/tape";
 import { PaymentStore } from "./payments/store";
+import { PaymentEngine } from "./payments/engine";
+import { IllegalTransition } from "./payments/states";
 import { MERCHANTS } from "./merchants";
 import { makePayPal, PayPalError, type PayPal } from "./paypal/client";
 import { makeBrain, type Brain } from "./haggle/brains";
 import { negotiate, discountKeys } from "./haggle/haggle";
+import { makeJudge, type JudgeBrain } from "./judge/judges";
 
 const CURRENCY = "USD";
-const MAX_PAYMENT_CENTS = 100_000; // 1,000.00 hard cap for now (guardrails grow in Phase 4)
+const MAX_PAYMENT_CENTS = 100_000; // 1,000.00 hard cap for now
 
-export function buildApp(env: Record<string, string | undefined> = process.env, paypal?: PayPal, brainOverride?: Brain) {
+export function buildApp(env: Record<string, string | undefined> = process.env, paypal?: PayPal, brainOverride?: Brain, judgeOverride?: JudgeBrain) {
   const app = Fastify({ logger: env.NODE_ENV !== "test" });
   const pp = paypal ?? makePayPal(env);
-  const store = new PaymentStore();
+  const warn = (e: unknown) => app.log.warn({ err: String(e) }, "Gemini failed, using offline agents");
+  const brain = brainOverride ?? makeBrain(env, warn);
+  const judges = judgeOverride ?? makeJudge(env, warn);
+  const store = new PaymentStore(env.DATA_FILE || undefined);
+  const payoutEmail = env.SHOP_PAYOUT_EMAIL || (pp.mode === "mock" ? "shop-owner@example.com" : undefined);
+  const engine = new PaymentEngine(store, pp, judges, payoutEmail);
   const publicUrl = env.PUBLIC_URL ?? "http://localhost:5173";
-  const brain = brainOverride ?? makeBrain(env, (e) => app.log.warn({ err: String(e) }, "Gemini failed, using offline agents"));
-  const haggleLog: number[] = [];
-  const haggleMax = Number(env.HAGGLE_MAX_PER_HOUR ?? 60);
+
+  // One shared budget for all AI calls (protects your Gemini quota on a public demo).
+  const aiLog: number[] = [];
+  const aiMax = Number(env.HAGGLE_MAX_PER_HOUR ?? 60);
+  const aiAllowed = () => {
+    const now = Date.now();
+    while (aiLog.length && now - aiLog[0] > 3_600_000) aiLog.shift();
+    if (aiLog.length >= aiMax) return false;
+    aiLog.push(now);
+    return true;
+  };
 
   const merchant = (id: string) => {
     const m = MERCHANTS.find((x) => x.id === id);
@@ -31,6 +47,7 @@ export function buildApp(env: Record<string, string | undefined> = process.env, 
 
   app.setErrorHandler((err: any, _req, reply) => {
     if (err.name === "ZodError") return reply.code(400).send({ error: "BAD_REQUEST", message: "Invalid request", issues: err.issues });
+    if (err instanceof IllegalTransition) return reply.code(409).send({ error: "ILLEGAL_STEP", message: err.message });
     if (err instanceof PayPalError) {
       app.log.error({ debugId: err.debugId, body: err.body }, "PayPal error");
       return reply.code(502).send({ error: "PAYPAL", message: err.message, debugId: err.debugId });
@@ -50,7 +67,7 @@ export function buildApp(env: Record<string, string | undefined> = process.env, 
     }).parse(req.body);
 
     const m = merchant(body.merchantId);
-    const view = replay(body.keys);                       // server recomputes everything
+    const view = replay(body.keys);
     if (!view.canPay || view.totalCents === null) {
       return reply.code(422).send({ error: "NOT_PAYABLE", message: view.error ?? "Enter a complete sum above zero" });
     }
@@ -70,56 +87,54 @@ export function buildApp(env: Record<string, string | undefined> = process.env, 
       returnUrl: `${publicUrl}/pay/return?payment=${id}`,
       cancelUrl: `${publicUrl}/pay/cancel?payment=${id}`,
     });
-    store.add({ id, merchantId: m.id, merchantName: m.name, amountCents: view.totalCents, currency: CURRENCY, lines: view.lines, tapeHash: hash, state: "CREATED", orderId: order.id, createdAt: new Date().toISOString() });
+    engine.create({ id, merchantId: m.id, merchantName: m.name, amountCents: view.totalCents, currency: CURRENCY, lines: view.lines, tapeHash: hash, orderId: order.id, createdAt: new Date().toISOString() });
     return { paymentId: id, approvalUrl: order.approvalUrl, totalCents: view.totalCents, tapeHash: hash };
   });
 
-  /** PayPal sends the buyer back here after they approve. We capture the money. */
+  /** PayPal sends the buyer back here after they approve. We capture and HOLD the money. */
   app.get("/pay/return", async (req, reply) => {
     const q = z.object({ payment: z.string(), token: z.string() }).parse(req.query);
-    const p = store.get(q.payment);
-    if (!p) return reply.code(404).send({ error: "NOT_FOUND", message: "Unknown payment" });
+    const p = engine.get(q.payment);
     if (q.token !== p.orderId) return reply.code(400).send({ error: "ORDER_MISMATCH", message: "That approval does not belong to this payment" });
-    if (p.state === "PAID") return reply.redirect(`/?paid=${p.id}`);
-    if (p.state !== "CREATED") return reply.redirect(`/?failed=${p.id}`);
-    try {
-      const cap = await pp.captureOrder(p.orderId, `khatapay-${p.id}-capture`);
-      if (cap.status === "COMPLETED") {
-        store.update(p.id, { state: "PAID", captureId: cap.captureId });
-        return reply.redirect(`/?paid=${p.id}`);
-      }
-      store.update(p.id, { state: "FAILED", error: `Capture status ${cap.status}` });
-    } catch (e: any) {
-      store.update(p.id, { state: "FAILED", error: e.message });
-      app.log.error(e);
-    }
-    return reply.redirect(`/?failed=${p.id}`);
+    const after = await engine.capture(p.id);
+    if (after.error) app.log.error({ id: after.id, error: after.error }, "capture failed");
+    return reply.redirect(after.state === "FAILED" ? `/?failed=${after.id}` : `/?paid=${after.id}`);
   });
 
   app.get("/pay/cancel", async (req, reply) => {
     const { payment } = z.object({ payment: z.string() }).parse(req.query);
-    const p = store.get(payment);
-    if (p && p.state === "CREATED") store.update(p.id, { state: "CANCELLED" });
+    engine.cancel(payment);
     return reply.redirect(`/?cancelled=${payment}`);
   });
 
-  app.get("/api/payments/:id", async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const p = store.get(id);
-    if (!p) return reply.code(404).send({ error: "NOT_FOUND", message: "Unknown payment" });
-    return p;
+  app.get("/api/payments", async () => store.list());
+  app.get("/api/payments/:id", async (req) => engine.get((req.params as { id: string }).id));
+
+  const idOf = (req: { params: unknown }) => (req.params as { id: string }).id;
+  app.post("/api/payments/:id/deliver", async (req) => engine.deliver(idOf(req)));
+  app.post("/api/payments/:id/confirm", async (req) => engine.confirm(idOf(req)));
+  app.post("/api/payments/:id/refund", async (req) => engine.refund(idOf(req)));
+  app.post("/api/payments/:id/dispute", async (req) => {
+    const b = z.object({ reason: z.enum(["not_received", "wrong_items", "wrong_amount", "other"]), note: z.string().max(200).default("") }).parse(req.body);
+    return engine.dispute(idOf(req), b.reason, b.note);
   });
-    /** Two AI agents negotiate a discount. They only propose; the referee limits them; the human approves. */
+  app.post("/api/payments/:id/respond", async (req) => {
+    const b = z.object({ stance: z.enum(["delivered_ok", "agrees_refund"]), note: z.string().max(200).default("") }).parse(req.body);
+    return engine.respond(idOf(req), b.stance, b.note);
+  });
+  app.post("/api/payments/:id/judge", async (req, reply) => {
+    if (engine.get(idOf(req)).state === "DISPUTED" && !aiAllowed()) return reply.code(429).send({ error: "RATE_LIMIT", message: "Too many AI requests, try again later" });
+    return engine.judge(idOf(req));
+  });
+
+  /** Two AI agents negotiate a discount. They only propose; the referee limits them; the human approves. */
   app.post("/api/haggle", async (req, reply) => {
     const body = z.object({ merchantId: z.string(), keys: z.array(z.enum(ALL_KEYS)).max(300) }).parse(req.body);
     const m = merchant(body.merchantId);
     const view = replay(body.keys);
     if (!view.canPay || view.totalCents === null) return reply.code(422).send({ error: "NOT_PAYABLE", message: "Enter a complete sum first" });
     if (view.totalCents < 100) return reply.code(422).send({ error: "TOO_SMALL", message: "Bill is too small to negotiate" });
-    const now = Date.now();
-    while (haggleLog.length && now - haggleLog[0] > 3_600_000) haggleLog.shift();
-    if (haggleLog.length >= haggleMax) return reply.code(429).send({ error: "RATE_LIMIT", message: "Too many negotiations, try again later" });
-    haggleLog.push(now);
+    if (!aiAllowed()) return reply.code(429).send({ error: "RATE_LIMIT", message: "Too many negotiations, try again later" });
 
     const out = await negotiate({ brain, merchantName: m.name, totalCents: view.totalCents, policy: { maxDiscountPct: m.maxDiscountPct, minTotalCents: 100 }, loyalty: m.loyalty });
     const finalKeys = [...body.keys, ...discountKeys(out.finalDiscountCents)];
@@ -127,7 +142,8 @@ export function buildApp(env: Record<string, string | undefined> = process.env, 
     if (after.totalCents !== view.totalCents - out.finalDiscountCents) throw new Error("Haggle result did not match the keypad");
     return { ...out, keys: finalKeys, totalBeforeCents: view.totalCents, totalAfterCents: after.totalCents };
   });
-  return { app, store, pp };
+
+  return { app, store, pp, engine };
 }
 
 // Start the server only when this file is run directly (not when imported by tests).

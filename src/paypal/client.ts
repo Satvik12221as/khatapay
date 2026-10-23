@@ -22,11 +22,16 @@ export interface CreateOrderInput {
 }
 export interface Order { id: string; status: string; approvalUrl: string }
 export interface Capture { orderId: string; captureId: string; status: string }
+export interface PayoutInput { email: string; amountCents: number; currency: string; note: string; batchId: string }
+export interface PayoutResult { batchId: string; status: string }
+export interface RefundResult { refundId: string; status: string }
 
 export interface PayPal {
   mode: "mock" | "sandbox";
   createOrder(a: CreateOrderInput): Promise<Order>;
   captureOrder(orderId: string, requestId: string): Promise<Capture>;
+  payout(a: PayoutInput): Promise<PayoutResult>;
+  refund(captureId: string, requestId: string, amountCents: number, currency: string): Promise<RefundResult>;
 }
 
 const money = (cents: number) => (cents / 100).toFixed(2);
@@ -35,7 +40,7 @@ const joinUrl = (base: string, extra: string) => base + (base.includes("?") ? "&
 /** Fake PayPal for offline development and tests. Idempotent, like the real API. */
 export class MockPayPal implements PayPal {
   mode = "mock" as const;
-  calls: { op: string; args: unknown }[] = [];
+  calls: { op: string; args: any }[] = [];
   private seen = new Map<string, unknown>();
   private once<T>(key: string, make: () => T): T {
     if (!this.seen.has(key)) this.seen.set(key, make());
@@ -52,9 +57,17 @@ export class MockPayPal implements PayPal {
     this.calls.push({ op: "captureOrder", args: { orderId } });
     return this.once(requestId, () => ({ orderId, captureId: "MOCK-CAP-" + randomUUID().slice(0, 8).toUpperCase(), status: "COMPLETED" }));
   }
+  async payout(a: PayoutInput): Promise<PayoutResult> {
+    this.calls.push({ op: "payout", args: a });
+    return this.once("payout:" + a.batchId, () => ({ batchId: "MOCK-PAYOUT-" + randomUUID().slice(0, 8).toUpperCase(), status: "SUCCESS" }));
+  }
+  async refund(captureId: string, requestId: string, amountCents: number, currency: string): Promise<RefundResult> {
+    this.calls.push({ op: "refund", args: { captureId, amountCents, currency } });
+    return this.once(requestId, () => ({ refundId: "MOCK-REF-" + randomUUID().slice(0, 8).toUpperCase(), status: "COMPLETED" }));
+  }
 }
 
-/** Real PayPal sandbox (REST v2 Orders). */
+/** Real PayPal sandbox (REST v2 Orders and Payments, v1 Payouts). */
 export class SandboxPayPal implements PayPal {
   mode = "sandbox" as const;
   private base = "https://api-m.sandbox.paypal.com";
@@ -85,7 +98,7 @@ export class SandboxPayPal implements PayPal {
       body: JSON.stringify(body),
     });
     const j: any = await r.json().catch(() => ({}));
-    if (!r.ok) throw new PayPalError(j.message ?? `PayPal call failed: ${path}`, r.status, j.debug_id ?? r.headers.get("paypal-debug-id") ?? undefined, j);
+    if (!r.ok) throw new PayPalError(j.message ?? j.name ?? `PayPal call failed: ${path}`, r.status, j.debug_id ?? r.headers.get("paypal-debug-id") ?? undefined, j);
     return j;
   }
 
@@ -121,6 +134,23 @@ export class SandboxPayPal implements PayPal {
     const j = await this.post(`/v2/checkout/orders/${encodeURIComponent(orderId)}/capture`, {}, requestId);
     const captureId = j.purchase_units?.[0]?.payments?.captures?.[0]?.id ?? "";
     return { orderId, captureId, status: j.status };
+  }
+
+  async payout(a: PayoutInput): Promise<PayoutResult> {
+    const j = await this.post("/v1/payments/payouts", {
+      sender_batch_header: { sender_batch_id: a.batchId, email_subject: "KhataPay: you have been paid" },
+      items: [{ recipient_type: "EMAIL", receiver: a.email, amount: { value: money(a.amountCents), currency: a.currency }, note: a.note, sender_item_id: a.batchId }],
+    }, a.batchId);
+    return { batchId: j.batch_header?.payout_batch_id ?? a.batchId, status: j.batch_header?.batch_status ?? "PENDING" };
+  }
+
+  async refund(captureId: string, requestId: string, amountCents: number, currency: string): Promise<RefundResult> {
+    const j = await this.post(`/v2/payments/captures/${encodeURIComponent(captureId)}/refund`, {
+      amount: { value: money(amountCents), currency_code: currency },
+      note_to_payer: "KhataPay refund",
+    }, requestId);
+    if (j.status === "FAILED" || j.status === "CANCELLED") throw new PayPalError(`Refund ${j.status}`, 502, j.debug_id, j);
+    return { refundId: j.id, status: j.status };
   }
 }
 

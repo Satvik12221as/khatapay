@@ -1,12 +1,10 @@
 import { Keypad, fatFingerCheck, formatMoney, type Key, type View } from "../src/keypad/keypad";
-
-// Must match the currency the server uses (USD in the PayPal sandbox).
-const CURRENCY = "$";
+import { CURRENCY, drawLines, el } from "./common";
+import { showStatus } from "./status";
 // Default shop. Replaced by the server's list on load (see init below).
 let SHOP = { id: "shop1", name: "Lakshmi Provision Store", typicalCents: 12000 };
 
 const kp = new Keypad();
-const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 const display = el<HTMLDivElement>("display");
 const linesEl = el<HTMLOListElement>("lines");
@@ -31,19 +29,6 @@ function showShop() {
   el<HTMLElement>("sheetShop").textContent = `To ${SHOP.name}`;
 }
 
-function drawLines(list: HTMLOListElement, lines: { expr: string; cents: number }[]) {
-  list.replaceChildren();
-  for (const l of lines) {
-    const li = document.createElement("li");
-    const expr = document.createElement("span");
-    expr.textContent = l.expr;
-    const amt = document.createElement("span");
-    amt.textContent = formatMoney(l.cents);
-    li.append(expr, amt);
-    list.append(li);
-  }
-}
-
 function render(v: View) {
   current = v;
   display.textContent = v.display || "0";
@@ -56,9 +41,6 @@ function render(v: View) {
   payBtn.textContent = v.canPay ? `Pay ${CURRENCY}${v.totalFormatted}` : "Pay";
 
   if (v.error) msgEl.textContent = v.error;
-  else if (v.totalCents !== null && v.totalCents <= 0) msgEl.textContent = "Total must be above zero.";
-  else msgEl.textContent = "";
-    if (v.error) msgEl.textContent = v.error;
   else if (v.totalCents !== null && v.totalCents <= 0) msgEl.textContent = "Total must be above zero.";
   else msgEl.textContent = "";
   updateHaggle();
@@ -208,42 +190,6 @@ haggleYes.addEventListener("click", async () => {
   for (const k of r.keys.slice(samePrefix ? sent.length : 0)) { press(k); await sleep(180); }
 });
 
-
-// ---- Result screen after PayPal sends the customer back ----
-async function showResult(kind: "paid" | "failed" | "cancelled", id: string) {
-  el("keypadView").hidden = true;
-  el("statusView").hidden = false;
-  const badge = el<HTMLElement>("badge");
-  const title = el<HTMLElement>("statusTitle");
-  const sub = el<HTMLElement>("statusSub");
-  badge.dataset.kind = kind;
-  badge.textContent = kind === "paid" ? "Paid" : kind === "failed" ? "Failed" : "Cancelled";
-  title.textContent = kind === "paid" ? "Payment complete" : kind === "failed" ? "Payment did not go through" : "You cancelled the payment";
-  sub.textContent = "";
-  try {
-    const r = await fetch(`/api/payments/${encodeURIComponent(id)}`);
-    if (!r.ok) throw new Error("not found");
-    const p = await r.json();
-    sub.textContent = `To ${p.merchantName}`;
-    drawLines(el<HTMLOListElement>("statusLines"), p.lines);
-    el("statusTotal").textContent = `${CURRENCY}${formatMoney(p.amountCents)}`;
-    const facts = el<HTMLElement>("facts");
-    facts.replaceChildren();
-    const add = (k: string, v: string) => {
-      const dt = document.createElement("dt"); dt.textContent = k;
-      const dd = document.createElement("dd"); dd.textContent = v;
-      facts.append(dt, dd);
-    };
-    add("PayPal order", p.orderId);
-    if (p.captureId) add("PayPal capture", p.captureId);
-    add("Tape fingerprint", p.tapeHash.slice(0, 16) + "...");
-    if (p.error) add("Reason", p.error);
-  } catch {
-    sub.textContent = "Could not load payment details.";
-  }
-}
-el<HTMLButtonElement>("again").addEventListener("click", () => { location.href = "/"; });
-
 async function init() {
   try {
     const r = await fetch("/api/merchants");
@@ -253,8 +199,7 @@ async function init() {
   render(current);
 
   const q = new URLSearchParams(location.search);
-  if (q.get("paid")) void showResult("paid", q.get("paid")!);
-  else if (q.get("failed")) void showResult("failed", q.get("failed")!);
-  else if (q.get("cancelled")) void showResult("cancelled", q.get("cancelled")!);
+  const id = q.get("paid") || q.get("failed") || q.get("cancelled");
+  if (id) showStatus(id);
 }
 void init();

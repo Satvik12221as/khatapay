@@ -19,7 +19,7 @@ describe("payment API (mock PayPal)", () => {
     expect(back.statusCode).toBe(302);
     expect(back.headers.location).toBe(`/?paid=${j.paymentId}`);
     const p = (await app.inject({ url: `/api/payments/${j.paymentId}` })).json();
-    expect(p.state).toBe("PAID");
+    expect(p.state).toBe("HELD");
     expect(p.captureId).toMatch(/^MOCK-CAP/);
     expect(p.lines.map((l: any) => l.cents)).toEqual([3000, 4000, 2000]);
     expect(pp.calls.filter((c) => c.op === "captureOrder")).toHaveLength(1);
