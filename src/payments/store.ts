@@ -31,7 +31,7 @@ export interface Payment {
   events: AuditEvent[];
 }
 
-/** Keeps payments in memory and (optionally) in a JSON file so a restart does not lose them. */
+/** Keeps payments in memory and (optionally) in a JSON file so a restart does not lose them */
 export class PaymentStore {
   private m = new Map<string, Payment>();
   constructor(private file?: string) {
