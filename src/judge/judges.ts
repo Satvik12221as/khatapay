@@ -87,7 +87,7 @@ export function makeJudge(env: Record<string, string | undefined> = process.env,
   return env.GEMINI_API_KEY ? new ResilientJudge(new GeminiJudge(env.GEMINI_API_KEY, env.GEMINI_MODEL || undefined), s, onError) : s;
 }
 
-/** Three judges vote in parallel. Majority wins. Judges can only pick release or refund.. */
+/** Three judges vote in parallel. Majority wins. Judges can only pick release or refund. */
 export async function runPanel(judge: JudgeBrain, ev: Evidence): Promise<PanelVerdict> {
   const votes: Vote[] = await Promise.all(PERSONAS.map(async (p) => ({ judge: p.name, ...(await judge.vote(p, ev)) })));
   const outcome = votes.filter((v) => v.verdict === "release").length >= 2 ? "release" : "refund";
