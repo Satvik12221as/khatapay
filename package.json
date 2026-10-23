@@ -1,7 +1,7 @@
 {
   "name": "khatapay",
   "version": "0.1.0",
-  "license": "MIT",
+  "licens": "MIT",
   "type": "module",
   "engines": {
     "node": ">=22.13"
