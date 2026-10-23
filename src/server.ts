@@ -146,7 +146,7 @@ export function buildApp(env: Record<string, string | undefined> = process.env, 
   return { app, store, pp, engine };
 }
 
-// Start the server only when this file is run directly (not when imported by tests).
+// Start the server only when this file is run directly (not when imported by tests)
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const { app, pp } = buildApp();
   const port = Number(process.env.PORT ?? 3000);
