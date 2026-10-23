@@ -88,7 +88,7 @@ export class PaymentEngine {
     });
   }
 
-  /** Three judges read the signed tape and vote. Plain code then executes the verdict through PayPal. */
+  /** Three judges read the signed tape and vote. Plain code then executes the verdict through PayPal */
   async judge(id: string): Promise<Payment> {
     const p = this.get(id);
     next(p.state, "release");                       // must be DISPUTED
