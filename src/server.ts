@@ -10,22 +10,22 @@ import { PaymentEngine } from "./payments/engine";
 import { IllegalTransition } from "./payments/states";
 import { MERCHANTS } from "./merchants";
 import { makePayPal, PayPalError, type PayPal } from "./paypal/client";
-import { makeBrain, type Brain } from "./haggle/brains";
-import { negotiate, discountKeys } from "./haggle/haggle";
-import { makeJudge, type JudgeBrain } from "./judge/judges";
+import { discountKeys } from "./haggle/haggle";
+import { makeNegotiator, type Negotiator } from "./agents/negotiator";
+import { makePanel, type Panel } from "./agents/panel";
 
 const CURRENCY = "USD";
 const MAX_PAYMENT_CENTS = 100_000; // 1,000.00 hard cap for now
 
-export function buildApp(env: Record<string, string | undefined> = process.env, paypal?: PayPal, brainOverride?: Brain, judgeOverride?: JudgeBrain) {
+export function buildApp(env: Record<string, string | undefined> = process.env, paypal?: PayPal, negotiatorOverride?: Negotiator, panelOverride?: Panel) {
   const app = Fastify({ logger: env.NODE_ENV !== "test" });
   const pp = paypal ?? makePayPal(env);
-  const warn = (e: unknown) => app.log.warn({ err: String(e) }, "Gemini failed, using offline agents");
-  const brain = brainOverride ?? makeBrain(env, warn);
-  const judges = judgeOverride ?? makeJudge(env, warn);
+  const warn = (e: unknown) => app.log.warn({ err: String(e) }, "Agent service unavailable or rejected, using offline agents");
+  const negotiator = negotiatorOverride ?? makeNegotiator(env, warn);
+  const panel = panelOverride ?? makePanel(env, warn);
   const store = new PaymentStore(env.DATA_FILE || undefined);
   const payoutEmail = env.SHOP_PAYOUT_EMAIL || (pp.mode === "mock" ? "shop-owner@example.com" : undefined);
-  const engine = new PaymentEngine(store, pp, judges, payoutEmail);
+  const engine = new PaymentEngine(store, pp, panel, payoutEmail);
   const publicUrl = env.PUBLIC_URL ?? "http://localhost:5173";
 
   // One shared budget for all AI calls (protects your Gemini quota on a public demo).
@@ -136,7 +136,7 @@ export function buildApp(env: Record<string, string | undefined> = process.env, 
     if (view.totalCents < 100) return reply.code(422).send({ error: "TOO_SMALL", message: "Bill is too small to negotiate" });
     if (!aiAllowed()) return reply.code(429).send({ error: "RATE_LIMIT", message: "Too many negotiations, try again later" });
 
-    const out = await negotiate({ brain, merchantName: m.name, totalCents: view.totalCents, policy: { maxDiscountPct: m.maxDiscountPct, minTotalCents: 100 }, loyalty: m.loyalty });
+    const out = await negotiator.run({ merchantName: m.name, totalCents: view.totalCents, policy: { maxDiscountPct: m.maxDiscountPct, minTotalCents: 100 }, loyalty: m.loyalty });
     const finalKeys = [...body.keys, ...discountKeys(out.finalDiscountCents)];
     const after = replay(finalKeys);
     if (after.totalCents !== view.totalCents - out.finalDiscountCents) throw new Error("Haggle result did not match the keypad");

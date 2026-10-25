@@ -2,11 +2,12 @@ import type { PayPal } from "../paypal/client";
 import type { AuditEvent, ClaimReason, Payment, PaymentStore, ShopStance } from "./store";
 import { IllegalTransition, next, type Action } from "./states";
 import { tapeHash } from "./tape";
-import { runPanel, type Evidence, type JudgeBrain } from "../judge/judges";
+import type { Evidence } from "../judge/judges";
+import type { Panel } from "../agents/panel";
 
 /** All money movement goes through here. Every step is validated, idempotent and logged. */
 export class PaymentEngine {
-  constructor(private store: PaymentStore, private pp: PayPal, private judges: JudgeBrain, private payoutEmail?: string) {}
+  constructor(private store: PaymentStore, private pp: PayPal, private panel: Panel, private payoutEmail?: string) {}
 
   get(id: string): Payment {
     const p = this.store.get(id);
@@ -102,7 +103,7 @@ export class PaymentEngine {
       shopStance: d.shopStance ?? "no_response", shopNote: d.shopNote ?? "",
     };
     const verdict = tapeVerified
-      ? await runPanel(this.judges, evidence)
+      ? await this.panel.run(evidence)
       : { votes: [], outcome: "refund" as const, note: "Tape fingerprint mismatch: refunded without a vote." };
     this.store.update(id, { dispute: { ...d, verdict } });
     const detail = `Verdict: ${verdict.outcome}`;

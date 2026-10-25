@@ -3,3 +3,7 @@ node_modules
 *.db
 dist
 data
+agents/.venv
+agents/.env
+__pycache__
+.pytest_cache

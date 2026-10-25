@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { negotiate, discountKeys, capFor } from "../src/haggle/haggle";
-import { GeminiBrain, ResilientBrain, ScriptedBrain, makeBrain, type Brain, type Ctx, type Decision } from "../src/haggle/brains";
+import { ScriptedBrain, type Brain, type Ctx, type Decision } from "../src/haggle/brains";
 import { buildApp } from "../src/server";
 import { MockPayPal } from "../src/paypal/client";
 import { replay } from "../src/payments/replay";
@@ -67,41 +67,6 @@ describe("referee", () => {
   });
 });
 
-describe("GeminiBrain (fetch is stubbed, no network)", () => {
-  const ctx: Ctx = { side: "customer", round: 1, merchantName: "Shop", totalCents: 9000, capCents: 900, comfortCents: 450, loyalty: regular, askCents: null, counterCents: null };
-  const reply = (obj: unknown) => async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(obj) }] } }] }), { status: 200 });
-
-  it("sends the key in a header (not the URL) and parses the JSON answer", async () => {
-    let seen: any;
-    const f = (async (url: string, init: any) => { seen = { url, init }; return reply({ accept: false, discount: 7.5, message: "Could you take $7.50 off?" })(); }) as any;
-    const d = await new GeminiBrain("SECRET-KEY", "gemini-2.5-flash", f).decide(ctx);
-    expect(d).toMatchObject({ accept: false, discountCents: 750, source: "gemini" });
-    expect(seen.url).toContain("gemini-2.5-flash:generateContent");
-    expect(seen.url).not.toContain("SECRET-KEY");
-    expect(seen.init.headers["x-goog-api-key"]).toBe("SECRET-KEY");
-    expect(JSON.parse(seen.init.body).generationConfig.responseMimeType).toBe("application/json");
-  });
-  it("accepts JSON wrapped in code fences", async () => {
-    const f = (async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '```json\n{"accept":true,"discount":3,"message":"ok"}\n```' }] } }] }), { status: 200 })) as any;
-    expect((await new GeminiBrain("k", "m", f).decide(ctx)).discountCents).toBe(300);
-  });
-  it("falls back to the rule-based agents on bad output, HTTP errors or network failure", async () => {
-    const bad = [
-      (async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "not json" }] } }] }), { status: 200 })) as any,
-      (async () => new Response(JSON.stringify({ error: { message: "quota" } }), { status: 429 })) as any,
-      (async () => { throw new Error("offline"); }) as any,
-      reply({ accept: "yes", discount: -5, message: "" }) as any,
-    ];
-    for (const f of bad) {
-      const errors: unknown[] = [];
-      const d = await new ResilientBrain(new GeminiBrain("k", "m", f), new ScriptedBrain(), (e) => errors.push(e)).decide(ctx);
-      expect(d.source).toBe("scripted");
-      expect(errors).toHaveLength(1);
-    }
-  });
-  it("makeBrain uses offline agents when there is no key", () => expect(makeBrain({})).toBeInstanceOf(ScriptedBrain));
-});
-
 describe("POST /api/haggle", () => {
   const make = (env: Record<string, string> = {}) => buildApp({ NODE_ENV: "test", PAYPAL_MODE: "mock", PUBLIC_URL: "http://t", ...env }, new MockPayPal()).app;
   const haggle = (app: any, body: any) => app.inject({ method: "POST", url: "/api/haggle", payload: body });
@@ -133,4 +98,3 @@ describe("POST /api/haggle", () => {
     expect((await haggle(app, { merchantId: "shop1", keys: K("50") })).statusCode).toBe(429);
   });
 });
-//haggle test file is complete and tests negotiation logic, discount keys, cap calculations, and API endpoints for haggle functionality.  
