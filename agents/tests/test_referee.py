@@ -29,3 +29,4 @@ def test_clamp_and_limits():
 
 def test_money_format():
     assert money(700) == "$7" and money(750) == "$7.50" and money(5) == "$0.05"
+    #
