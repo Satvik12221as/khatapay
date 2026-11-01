@@ -85,5 +85,5 @@ def test_gemini_brain_requires_a_key():
 
 
 def test_real_langchain_client_builds_without_network():
-    b = GeminiBrain("fake-key")  # constructs ChatGoogleGenerativeAI, makes no call.
+    b = GeminiBrain("fake-key")  # constructs ChatGoogleGenerativeAI, makes no call
     assert b._factory(HaggleReply) is not None
