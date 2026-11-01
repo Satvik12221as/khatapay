@@ -11,9 +11,13 @@
     <header class="top">
       <span class="shop-sub">Paying</span>
       <h1 class="shop-name" id="shopName">Shop</h1>
+      <select id="shopSelect" class="field" aria-label="Choose a shop" hidden></select>
+      <button class="trust" id="trustBadge" type="button" hidden></button>
+      <p class="hint" id="trustWhy" hidden></p>
     </header>
 
     <div id="keypadView" class="view">
+      <div class="refbanner" id="refBanner" hidden></div>
       <section class="tape" aria-label="Your bill">
         <div class="tape-head">
           <span class="tape-title">Your bill</span>
@@ -52,6 +56,7 @@
 
       <button class="pay" id="pay" type="button" disabled>Pay</button>
       <button class="ghost" id="haggle" type="button" disabled>Haggle with AI</button>
+      <button class="ghost" id="referBtn" type="button">Refer a friend</button>
     </div>
 
     <section id="statusView" class="view status" hidden aria-live="polite">
@@ -91,7 +96,11 @@
       <button class="pay" id="haggleYes" type="button" disabled>Apply</button>
     </div>
   </dialog>
-
+  <dialog id="referSheet" class="sheet wide">
+  <h2>Refer a friend</h2>
+  <div id="referBody"></div>
+  <div class="sheet-actions"><button class="ghost" id="referClose" type="button">Close</button></div>
+  </dialog>
   <script type="module" src="/web/main.ts"></script>
 </body>
 </html>

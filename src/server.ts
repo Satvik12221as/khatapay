@@ -13,6 +13,11 @@ import { makePayPal, PayPalError, type PayPal } from "./paypal/client";
 import { discountKeys } from "./haggle/haggle";
 import { makeNegotiator, type Negotiator } from "./agents/negotiator";
 import { makePanel, type Panel } from "./agents/panel";
+import { makeRecommender } from "./agents/recommender";
+import { ReferralStore } from "./referrals/store";
+import { ReferralService } from "./referrals/service";
+import { registerReferralRoutes } from "./referrals/routes";
+import { policyFromEnv } from "./referrals/rules";
 
 const CURRENCY = "USD";
 const MAX_PAYMENT_CENTS = 100_000; // 1,000.00 hard cap for now
@@ -27,6 +32,13 @@ export function buildApp(env: Record<string, string | undefined> = process.env, 
   const payoutEmail = env.SHOP_PAYOUT_EMAIL || (pp.mode === "mock" ? "shop-owner@example.com" : undefined);
   const engine = new PaymentEngine(store, pp, panel, payoutEmail);
   const publicUrl = env.PUBLIC_URL ?? "http://localhost:5173";
+  const referrals = new ReferralService({
+    payments: store, pp,
+    store: new ReferralStore(env.REFERRALS_FILE || undefined),
+    recommender: makeRecommender(env, warn),
+    merchants: MERCHANTS, policy: policyFromEnv(env),
+    });
+  registerReferralRoutes(app, referrals);
 
   // One shared budget for all AI calls (protects your Gemini quota on a public demo).
   const aiLog: number[] = [];
@@ -143,7 +155,7 @@ export function buildApp(env: Record<string, string | undefined> = process.env, 
     return { ...out, keys: finalKeys, totalBeforeCents: view.totalCents, totalAfterCents: after.totalCents };
   });
 
-  return { app, store, pp, engine };
+    return { app, store, pp, engine, referrals };
 }
 
 // Start the server only when this file is run directly (not when imported by tests)

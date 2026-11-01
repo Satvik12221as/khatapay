@@ -1,6 +1,7 @@
 import { Keypad, fatFingerCheck, formatMoney, type Key, type View } from "../src/keypad/keypad";
 import { CURRENCY, drawLines, el } from "./common";
 import { showStatus } from "./status";
+import { initCustomer, linkPayment } from "./customer";
 // Default shop. Replaced by the server's list on load (see init below).
 let SHOP = { id: "shop1", name: "Lakshmi Provision Store", typicalCents: 12000 };
 
@@ -97,6 +98,7 @@ confirmBtn.addEventListener("click", async () => {
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.message || j.reason || "Payment could not start");
+    await linkPayment(j.paymentId);
     location.href = j.approvalUrl;
   } catch (e) {
     const m = (e as Error).message;
@@ -190,13 +192,38 @@ haggleYes.addEventListener("click", async () => {
   for (const k of r.keys.slice(samePrefix ? sent.length : 0)) { press(k); await sleep(180); }
 });
 
+let MERCHANTS: { id: string; name: string; typicalCents: number }[] = [];
+let ui: { onShopChanged(): void } | null = null;
+
+function setShop(id: string) {
+  const s = MERCHANTS.find((m) => m.id === id);
+  if (!s) return;
+  SHOP = s;
+  showShop();
+  ui?.onShopChanged();
+}
+
 async function init() {
   try {
     const r = await fetch("/api/merchants");
-    if (r.ok) { const list = await r.json(); if (list[0]) SHOP = list[0]; }
+    if (r.ok) { MERCHANTS = await r.json(); if (MERCHANTS[0]) SHOP = MERCHANTS[0]; }
   } catch { /* server not running: keep the default shop */ }
+
+  const sel = el<HTMLSelectElement>("shopSelect");
+  sel.replaceChildren(...MERCHANTS.map((m) => { const o = document.createElement("option"); o.value = m.id; o.textContent = m.name; return o; }));
+  sel.hidden = MERCHANTS.length < 2;
+  sel.addEventListener("change", () => setShop(sel.value));
+
   showShop();
   render(current);
+
+  ui = await initCustomer({
+    press: (k) => press(k as Key),
+    total: () => current.totalCents,
+    shop: () => SHOP,
+    setShop: (id) => { sel.value = id; setShop(id); },
+    sleep,
+  });
 
   const q = new URLSearchParams(location.search);
   const id = q.get("paid") || q.get("failed") || q.get("cancelled");

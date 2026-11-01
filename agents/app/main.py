@@ -10,6 +10,7 @@ from .config import Settings
 from .haggle_graph import build_haggle_graph, run_haggle
 from .judge_graph import build_judge_graph, run_judge
 from .models import Evidence, HaggleRequest, HaggleResponse, JudgeResponse
+from .referral_api import build_router, make_referral_brain
 
 log = logging.getLogger("agents")
 
@@ -34,6 +35,8 @@ def create_app(brain: Optional[Brain] = None, settings: Optional[Settings] = Non
         if settings.agents_api_key and not hmac.compare_digest(x_agents_key or "", settings.agents_api_key):
             raise HTTPException(status_code=401, detail="Bad agents key")
 
+    app.include_router(build_router(make_referral_brain(settings), guard))
+    
     @app.get("/health")
     async def health() -> dict:
         return {"ok": True, "llm": "gemini" if settings.gemini_api_key else "scripted", "framework": "langgraph"}
