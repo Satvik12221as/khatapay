@@ -76,4 +76,4 @@ async function load() {
   }
 }
 void load();
-window.setInterval(load, 3000)
+window.setInterval(load, 3000);
