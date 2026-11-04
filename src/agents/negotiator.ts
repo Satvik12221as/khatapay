@@ -41,7 +41,7 @@ export class RemoteNegotiator implements Negotiator {
       return checkOutcome(raw, i);
     } catch (e) {
       this.onError(e);
-      return this.fallback.run(i);
+      return this.fallback.run(i)
     }
   }
 }
