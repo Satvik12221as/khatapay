@@ -8,6 +8,7 @@ import { tapeHash } from "./payments/tape";
 import { PaymentStore } from "./payments/store";
 import { PaymentEngine } from "./payments/engine";
 import { IllegalTransition } from "./payments/states";
+import type { ClaimReason } from "./payments/store";
 import { MERCHANTS } from "./merchants";
 import { makePayPal, PayPalError, type PayPal } from "./paypal/client";
 import { discountKeys } from "./haggle/haggle";
@@ -26,6 +27,7 @@ import { trustScore, statsFor } from "./trust/trust";
 import { broadcastEvent, registerSSEClient, unregisterSSEClient, EventTypes } from "./events/sse";
 import { buildSimulatedWebhook, processPayPalWebhook, emitAgentInsightsGenerated, emitAgentInvoiceGenerated, emitAgentReferralPaid, emitJudgeVerdict, emitPaymentStateChanged } from "./paypal/webhooks";
 import { WorkflowOrchestrator, makeOrchestrator, type OrchestratorDeps } from "./orchestrator/workflow";
+import { initZapier, ZapierEvents } from "./zapier/webhooks";
 
 const CURRENCY = "USD";
 const MAX_PAYMENT_CENTS = 100_000; // 1,000.00 hard cap for now
@@ -89,6 +91,78 @@ export function buildApp(env: Record<string, string | undefined> = process.env, 
     merchants: MERCHANTS,
     store,
   });
+
+  // Initialize Zapier webhook integration
+  initZapier(env);
+
+  // Hook into engine events for Zapier
+  const originalEmitPaymentStateChanged = emitPaymentStateChanged;
+  const originalEmitJudgeVerdict = emitJudgeVerdict;
+
+  // Override emit functions to also send to Zapier
+  // Note: We use the existing emit functions which are already called by the engine
+
+  // Hook into referral service for Zapier
+  const originalReferralSync = referrals.sync.bind(referrals);
+  referrals.sync = async (paymentId: string) => {
+    const result = await originalReferralSync(paymentId);
+    const payment = engine.get(paymentId);
+    if (payment) {
+      ZapierEvents.referralPaid(paymentId, 300, payment.merchantId); // 300 cents = $3 default
+    }
+    return result;
+  };
+
+  // Hook into engine.capture for Zapier
+  const originalEngineCapture = engine.capture.bind(engine);
+  engine.capture = async (id: string) => {
+    const payment = await originalEngineCapture(id);
+    if (payment.state === "HELD") {
+      ZapierEvents.paymentCaptured(payment.id, payment.amountCents, payment.merchantId);
+    }
+    return payment;
+  };
+
+  // Hook into engine.confirm for Zapier (payout completed)
+  const originalEngineConfirm = engine.confirm.bind(engine);
+  engine.confirm = async (id: string) => {
+    const payment = await originalEngineConfirm(id);
+    if (payment.state === "RELEASED" && payment.payoutId) {
+      ZapierEvents.payoutCompleted(payment.payoutId, payment.amountCents, payment.merchantId);
+    }
+    return payment;
+  };
+
+  // Hook into engine.refund for Zapier
+  const originalEngineRefund = engine.refund.bind(engine);
+  engine.refund = async (id: string) => {
+    const payment = await originalEngineRefund(id);
+    if (payment.state === "REFUNDED" && payment.refundId) {
+      ZapierEvents.refundIssued(payment.id, payment.amountCents, "Customer requested");
+    }
+    return payment;
+  };
+
+  // Hook into engine.dispute for Zapier
+  const originalEngineDispute = engine.dispute.bind(engine);
+  engine.dispute = (id: string, reason: ClaimReason, note: string) => {
+    const payment = originalEngineDispute(id, reason, note);
+    if (payment.state === "DISPUTED") {
+      ZapierEvents.disputeOpened(payment.id, payment.amountCents, reason);
+    }
+    return payment;
+  };
+
+  // Hook into engine.judge for Zapier
+  const originalEngineJudge = engine.judge.bind(engine);
+  engine.judge = async (id: string) => {
+    const payment = await originalEngineJudge(id);
+    if (payment.state === "RELEASED" || payment.state === "REFUNDED") {
+      const outcome = payment.state === "RELEASED" ? "release" : "refund";
+      ZapierEvents.judgeVerdict(payment.id, outcome, payment.amountCents);
+    }
+    return payment;
+  };
 
   app.setErrorHandler((err: any, _req, reply) => {
     if (err.name === "ZodError") return reply.code(400).send({ error: "BAD_REQUEST", message: "Invalid request", issues: err.issues });

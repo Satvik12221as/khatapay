@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>KhataPay Merchant Dashboard</title>
   <link rel="stylesheet" href="/web/style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@36.3.0/styles/ag-grid.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@36.3.0/styles/ag-theme-alpine.css">
 </head>
 <body class="wide">
   <main class="app">
@@ -52,21 +54,25 @@
       <div id="invoicesContent" style="display:none;"></div>
     </section>
 
-    <!-- Payments List -->
+    <!-- Payments Grid -->
     <section>
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
         <h3 style="margin:0;">Payments</h3>
-        <select id="stateFilter" class="field" style="width:auto;">
-          <option value="">All States</option>
-          <option value="HELD">Held</option>
-          <option value="FULFILLED">Fulfilled</option>
-          <option value="DISPUTED">Disputed</option>
-          <option value="RELEASED">Released</option>
-          <option value="REFUNDED">Refunded</option>
-        </select>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <input type="search" id="paymentSearch" class="field" placeholder="Search payments..." style="width:200px;">
+          <select id="stateFilter" class="field" style="width:auto;">
+            <option value="">All States</option>
+            <option value="HELD">Held</option>
+            <option value="FULFILLED">Fulfilled</option>
+            <option value="DISPUTED">Disputed</option>
+            <option value="RELEASED">Released</option>
+            <option value="REFUNDED">Refunded</option>
+          </select>
+          <button type="button" class="ghost" id="refreshBtn">Refresh</button>
+        </div>
       </div>
       <p class="msg" id="mMsg" role="status"></p>
-      <ol class="cards" id="list"></ol>
+      <div id="paymentsGrid" class="ag-theme-alpine" style="height: 500px; width: 100%;"></div>
     </section>
   </main>
   <script type="module" src="/web/merchant-dashboard.ts"></script>

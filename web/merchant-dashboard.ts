@@ -1,8 +1,9 @@
 import { api, button, drawAudit, drawLines, drawVerdict, el, money, REASONS, select, STATE_INFO, text, textarea, type PaymentDTO } from "./common";
 import { EventTypes } from "../src/events/sse";
-// Simulator functions imported inline to avoid module issues
+import { createGrid, GridOptions, ColDef, GridReadyEvent, RowDoubleClickedEvent } from "ag-grid-community";
+import "ag-grid-community/styles/ag-grid.css";
+import "ag-grid-community/styles/ag-theme-alpine.css";
 
-const list = el<HTMLOListElement>("list");
 const msg = el<HTMLElement>("mMsg");
 const shopName = el<HTMLElement>("shopName");
 const connStatus = el<HTMLElement>("connectionStatus");
@@ -17,12 +18,152 @@ const invoicesPanel = el<HTMLElement>("invoicesPanel");
 const invoicesLoading = el<HTMLElement>("invoicesLoading");
 const invoicesContent = el<HTMLElement>("invoicesContent");
 const stateFilter = el<HTMLSelectElement>("stateFilter");
+const gridContainer = el<HTMLDivElement>("paymentsGrid");
+const searchInput = el<HTMLInputElement>("paymentSearch");
+const refreshBtn = el<HTMLButtonElement>("refreshBtn");
 
+let merchantId = "";
+let gridApi: any = null;
 let lastJson = "";
 let eventSource: EventSource | null = null;
-let merchantId = "";
 
-/** Initialize connection status UI */
+// ---- Cell Renderers ----
+const cellRendererState = (params: { value: string }) => {
+  const info = STATE_INFO[params.value as keyof typeof STATE_INFO];
+  if (!info) return params.value;
+  const badge = document.createElement("span");
+  badge.className = "badge";
+  badge.dataset.kind = info.kind;
+  badge.textContent = info.label;
+  return badge;
+};
+
+const cellRendererDispute = (params: { value: { reason: string } | undefined }) => {
+  if (!params.value) return "—";
+  const d = params.value;
+  const badge = document.createElement("span");
+  badge.className = "badge";
+  badge.dataset.kind = "bad";
+  badge.textContent = REASONS[d.reason] ?? d.reason;
+  return badge;
+};
+
+const cellRendererActions = (params: { value: string }) => {
+  const container = document.createElement("div");
+  container.style.display = "flex";
+  container.style.gap = "4px";
+  container.style.flexWrap = "wrap";
+  container.style.justifyContent = "center";
+  return container;
+};
+
+// ---- Column Definitions ----
+const columnDefs: any[] = [
+  {
+    headerName: "State",
+    field: "state",
+    width: 130,
+    cellRenderer: cellRendererState,
+    pinned: "left",
+    filter: "agSetColumnFilter",
+    filterParams: {
+      values: ["HELD", "FULFILLED", "DISPUTED", "RELEASED", "REFUNDED", "FAILED", "CANCELLED"],
+    },
+  },
+  {
+    headerName: "Amount",
+    field: "amountCents",
+    width: 110,
+    valueFormatter: (params: { value: number }) => money(params.value),
+    pinned: "left",
+    filter: "agNumberColumnFilter",
+  },
+  {
+    headerName: "Merchant",
+    field: "merchantName",
+    width: 180,
+    filter: "agTextColumnFilter",
+  },
+  {
+    headerName: "Created",
+    field: "createdAt",
+    width: 160,
+    valueFormatter: (params: { value: string }) => new Date(params.value).toLocaleString(),
+    filter: "agDateColumnFilter",
+  },
+  {
+    headerName: "Items",
+    field: "lines",
+    width: 100,
+    valueFormatter: (params: { value: any[] }) => `${params.value?.length ?? 0} items`,
+  },
+  {
+    headerName: "Dispute",
+    field: "dispute",
+    width: 100,
+    cellRenderer: (params: { value: { reason: string } | undefined }) => {
+      if (!params.value) return "—";
+      const d = params.value;
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      badge.dataset.kind = "bad";
+      badge.textContent = REASONS[d.reason] ?? d.reason;
+      return badge;
+    },
+    filter: "agTextColumnFilter",
+  },
+  {
+    headerName: "Actions",
+    field: "id",
+    width: 200,
+    cellRenderer: (params: { value: string }) => {
+      const container = document.createElement("div");
+      container.style.display = "flex";
+      container.style.gap = "4px";
+      container.style.flexWrap = "wrap";
+      container.style.justifyContent = "center";
+      return container;
+    },
+    suppressSizeToFit: true,
+  },
+];
+
+const defaultColDef: any = {
+  sortable: true,
+  filter: true,
+  resizable: true,
+  suppressSizeToFit: true,
+};
+
+// ---- Init ----
+function initGrid() {
+  const gridOptions: any = {
+    columnDefs,
+    defaultColDef,
+    rowData: [],
+    rowHeight: 52,
+    animateRows: true,
+    pagination: true,
+    paginationPageSize: 20,
+    paginationPageSizeSelector: [10, 20, 50, 100],
+    rowSelection: "single",
+    suppressRowClickSelection: true,
+    onRowDoubleClicked: onRowDoubleClicked,
+    onGridReady: (event: any) => {
+      gridApi = event.api;
+      load();
+    },
+    getRowId: (params: any) => params.data.id,
+    suppressRowHoverHighlight: false,
+    localeText: {
+      noRowsToShow: "No payments yet. Make one on the customer keypad.",
+    },
+  };
+
+  gridApi = createGrid(gridContainer, gridOptions);
+}
+
+// ---- Connection Status ----
 function setConnectionStatus(state: "connecting" | "connected" | "disconnected", message: string) {
   connStatus.style.display = "flex";
   connBadge.className = "chip";
@@ -31,23 +172,18 @@ function setConnectionStatus(state: "connecting" | "connected" | "disconnected",
   connMsg.textContent = message;
 }
 
-/** Start SSE connection for real-time events */
 function startSSE() {
   if (eventSource) return;
   const url = `/api/events?merchantId=${encodeURIComponent(merchantId)}`;
   eventSource = new EventSource(url);
 
-  eventSource.onopen = () => {
-    setConnectionStatus("connected", "Receiving live agent events");
-  };
+  eventSource.onopen = () => setConnectionStatus("connected", "Receiving live agent events");
 
   eventSource.onmessage = (e) => {
     try {
       const event = JSON.parse(e.data);
       handleSSEEvent(event);
-    } catch {
-      // ignore parse errors
-    }
+    } catch { /* ignore */ }
   };
 
   eventSource.onerror = () => {
@@ -59,26 +195,22 @@ function startSSE() {
 }
 
 function handleSSEEvent(event: { type: string; [key: string]: unknown }) {
-  // Show toast notification
   showToast(event);
-
-  // Refresh relevant panels
-  switch (event.type) {
-    case EventTypes.AGENT_INSIGHTS_GENERATED:
-    case EventTypes.AGENT_INVOICE_GENERATED:
-    case EventTypes.AGENT_REFERRAL_PAID:
-    case EventTypes.AGENT_HAGGLE_COMPLETED:
-    case EventTypes.JUDGE_VERDICT:
-    case EventTypes.PAYMENT_STATE_CHANGED:
-    case EventTypes.PAYMENT_CAPTURE_COMPLETED:
-    case EventTypes.PAYOUT_COMPLETED:
-    case EventTypes.REFUND_COMPLETED:
-      load(); // Refresh payments
-      break;
+  if ([
+    EventTypes.AGENT_INSIGHTS_GENERATED,
+    EventTypes.AGENT_INVOICE_GENERATED,
+    EventTypes.AGENT_REFERRAL_PAID,
+    EventTypes.AGENT_HAGGLE_COMPLETED,
+    EventTypes.JUDGE_VERDICT,
+    EventTypes.PAYMENT_STATE_CHANGED,
+    EventTypes.PAYMENT_CAPTURE_COMPLETED,
+    EventTypes.PAYOUT_COMPLETED,
+    EventTypes.REFUND_COMPLETED,
+  ].includes(event.type)) {
+    load();
   }
 }
 
-/** Simple toast notification */
 function showToast(event: { type: string; [key: string]: unknown }) {
   const toast = document.createElement("div");
   toast.className = "toast";
@@ -102,33 +234,159 @@ function showToast(event: { type: string; [key: string]: unknown }) {
     [EventTypes.PAYMENT_STATE_CHANGED]: `📦 Payment: ${event.from} → ${event.to}`,
   };
 
-  toast.textContent = labels[event.type] || `Event: ${event.type}`;
+  toast.textContent = labels[event.type] ?? `Event: ${event.type}`;
   document.body.appendChild(toast);
   setTimeout(() => { toast.style.opacity = "0"; toast.style.transition = "opacity 300ms"; setTimeout(() => toast.remove(), 300); }, 4000);
 }
 
-/** Load merchant info */
-async function init() {
+// ---- Load Data ----
+async function load() {
   try {
-    const shops = await api<{ id: string; name: string }[]>("/api/merchants");
-    const params = new URLSearchParams(location.search);
-    merchantId = params.get("shop") || shops[0]?.id || "shop1";
-    const shop = shops.find(s => s.id === merchantId);
-    shopName.textContent = shop?.name || "Unknown Shop";
+    const all = await api<PaymentDTO[]>("/api/payments");
+    const filter = stateFilter.value;
+    const shown = all.filter(p => {
+      if (filter && p.state !== filter) return false;
+      return p.state !== "CREATED" && p.state !== "CANCELLED";
+    });
 
-    startSSE();
-    loadInsights();
-    loadInvoices();
-    load();
-
-    // Simulator buttons (only in mock mode)
-    setupSimulator();
+    if (gridApi) {
+      gridApi.setGridOption("rowData", shown);
+    }
+    lastJson = JSON.stringify(shown);
   } catch (e) {
     msg.textContent = (e as Error).message;
   }
 }
 
-/** Load AI insights */
+// ---- Event Handlers ----
+function onRowDoubleClicked(event: any) {
+  const p = event.data;
+  if (!p) return;
+  showPaymentDetail(p);
+}
+
+function showPaymentDetail(p: PaymentDTO) {
+  const info = STATE_INFO[p.state];
+  const modal = document.createElement("dialog");
+  modal.className = "sheet";
+  modal.style.maxWidth = "600px";
+
+  const badge = document.createElement("span");
+  badge.className = "badge";
+  badge.dataset.kind = info.kind;
+  badge.textContent = info.label;
+
+  const lines = document.createElement("ol");
+  lines.className = "lines";
+  p.lines.forEach(l => {
+    const li = document.createElement("li");
+    li.style.display = "flex";
+    li.style.justifyContent = "space-between";
+    li.append(document.createTextNode(l.expr), document.createTextNode(money(l.cents)));
+    lines.append(li);
+  });
+
+  const actionsDiv = document.createElement("div");
+  actionsDiv.style.display = "flex";
+  actionsDiv.style.flexDirection = "column";
+  actionsDiv.style.gap = "8px";
+  actionsDiv.style.marginTop = "16px";
+
+  const makeAction = (label: string, path: string, body?: unknown, cls = "pay") => {
+    const btn = button(label, cls, async () => {
+      try { await api(`/api/payments/${encodeURIComponent(p.id)}/${path}`, "POST", body); } catch (e) { msg.textContent = (e as Error).message; }
+      load();
+      modal.close();
+    });
+    return btn;
+  };
+
+  if (p.state === "HELD") actionsDiv.append(makeAction("Mark delivered", "deliver"));
+  if (p.state === "FULFILLED") actionsDiv.append(document.createTextNode("Waiting for the customer to confirm."));
+  if (p.state === "DISPUTED" && p.dispute) {
+    const d = p.dispute;
+    if (!d.shopStance) {
+      const stance = select({ delivered_ok: "I delivered, the claim is wrong", agrees_refund: "I agree to refund" });
+      const note = textarea("Your side (optional)");
+      actionsDiv.append(stance, note, makeAction("Send reply", "respond", { stance: stance.value, note: note.value }, "ghost"));
+    } else {
+      actionsDiv.append(document.createTextNode(`Your reply: ${d.shopStance === "agrees_refund" ? "agree to refund" : "delivered"}${d.shopNote ? ` ("${d.shopNote}")` : ""}`));
+    }
+    if (!d.verdict) actionsDiv.append(makeAction("Ask the Tape Judges", "judge"));
+  }
+
+  const verdict = document.createElement("div");
+  verdict.className = "verdict";
+
+  const facts = document.createElement("dl");
+  facts.className = "facts";
+  for (const [k, v] of [["Captured", p.captureId], ["Payout", p.payoutId], ["Refund", p.refundId]] as const) if (v) facts.append(text("dt", "", k), text("dd", "", v));
+
+  const det = document.createElement("details");
+  det.className = "audit";
+  det.append(text("summary", "", "Audit trail"));
+  const ol = document.createElement("ol");
+
+  modal.append(
+    document.createElement("h2").append(document.createTextNode(`${money(p.amountCents)} · ${p.merchantName}`), badge),
+    document.createElement("div").append(document.createTextNode(`${new Date(p.createdAt).toLocaleString()} · ${p.id.slice(0, 8)}`)),
+    lines,
+    document.createElement("hr"),
+    actionsDiv,
+    verdict,
+    facts,
+    det,
+    button("Close", "ghost", () => modal.close())
+  );
+
+  document.body.appendChild(modal);
+  modal.showModal();
+}
+
+// ---- Simulator ----
+function setupSimulator() {
+  simPanel.style.display = "block";
+  const handlers: Record<string, { event?: string; label: string }> = {
+    simCapture: { event: "CAPTURE_COMPLETED", label: "Capture Completed" },
+    simPayout: { event: "PAYOUT_COMPLETED", label: "Payout Completed" },
+    simRefund: { event: "REFUND_COMPLETED", label: "Refund Completed" },
+    simDispute: { event: "DISPUTE_CREATED", label: "Dispute Created" },
+    simInsights: { label: "Generate Insights" },
+    simInvoice: { label: "Generate Invoice" },
+  };
+
+  for (const [id, handler] of Object.entries(handlers)) {
+    const btn = el<HTMLButtonElement>(id);
+    btn.addEventListener("click", async () => {
+      btn.disabled = true; btn.textContent = `Simulating ${handler.label}...`;
+      simMsg.textContent = `Simulating ${handler.label}...`;
+      try {
+        if (handler.event) {
+          await api("/webhooks/simulate", "POST", { event: handler.event });
+          showToast({ type: handler.event } as any);
+        } else if (id === "simInsights") {
+          await api(`/api/merchants/${merchantId}/insights`, "GET");
+          loadInsights();
+        } else if (id === "simInvoice") {
+          const payments = await api<PaymentDTO[]>(`/api/payments?merchantId=${merchantId}`);
+          const released = payments.find(p => p.state === "RELEASED");
+          if (!released) throw new Error("No released payments to invoice");
+          const lines = released.lines.map(l => ({ description: l.expr, quantity: 1, unitPriceCents: l.cents, totalCents: l.cents }));
+          await api("/api/invoices/generate", "POST", { paymentId: released.id, merchant: { id: merchantId, name: released.merchantName }, lineItems: lines, taxRate: 0.18 });
+          showToast({ type: "AGENT_INVOICE_GENERATED", invoiceNumber: `INV-${Date.now()}` } as any);
+          loadInvoices();
+        }
+        simMsg.textContent = `${handler.label} simulated successfully!`;
+      } catch (e) {
+        simMsg.textContent = (e as Error).message;
+      } finally {
+        btn.disabled = false; btn.textContent = handler.label;
+      }
+    });
+  }
+}
+
+// ---- Insights / Invoices ----
 async function loadInsights() {
   insightsLoading.style.display = "block";
   insightsContent.style.display = "none";
@@ -154,7 +412,6 @@ async function loadInsights() {
   }
 }
 
-/** Load generated invoices */
 async function loadInvoices() {
   invoicesLoading.style.display = "block";
   invoicesContent.style.display = "none";
@@ -188,18 +445,12 @@ async function loadInvoices() {
   }
 }
 
-/** Generate invoice for a payment */
 async function generateInvoice(paymentId: string) {
   const btn = document.querySelector(`button[onclick="generateInvoice('${paymentId}')"]`) as HTMLButtonElement;
   if (btn) { btn.disabled = true; btn.textContent = "Generating..."; }
   try {
     const payment = await api<PaymentDTO>(`/api/payments/${paymentId}`);
-    const lines = payment.lines.map(l => ({
-      description: l.expr,
-      quantity: 1,
-      unitPriceCents: l.cents,
-      totalCents: l.cents,
-    }));
+    const lines = payment.lines.map(l => ({ description: l.expr, quantity: 1, unitPriceCents: l.cents, totalCents: l.cents }));
     await api("/api/invoices/generate", "POST", {
       paymentId,
       merchant: { id: merchantId, name: payment.merchantName },
@@ -207,7 +458,7 @@ async function generateInvoice(paymentId: string) {
       taxRate: 0.18,
     });
     await loadInvoices();
-    showToast({ type: EventTypes.AGENT_INVOICE_GENERATED, invoiceNumber: `INV-${Date.now()}` } as any);
+    showToast({ type: "AGENT_INVOICE_GENERATED", invoiceNumber: `INV-${Date.now()}` } as any);
   } catch (e) {
     msg.textContent = (e as Error).message;
   } finally {
@@ -215,147 +466,42 @@ async function generateInvoice(paymentId: string) {
   }
 }
 
-/** Preview invoice (placeholder) */
 function previewInvoice(paymentId: string) {
   window.open(`/api/invoices/preview?paymentId=${paymentId}`, "_blank");
 }
 
-/** Simulator setup */
-function setupSimulator() {
-  simPanel.style.display = "block";
-
-  const handlers: Record<string, { event: string; label: string }> = {
-    simCapture: { event: "CAPTURE_COMPLETED", label: "Capture Completed" },
-    simPayout: { event: "PAYOUT_COMPLETED", label: "Payout Completed" },
-    simRefund: { event: "REFUND_COMPLETED", label: "Refund Completed" },
-    simDispute: { event: "DISPUTE_CREATED", label: "Dispute Created" },
-  };
-
-  for (const [id, { event, label }] of Object.entries(handlers)) {
-    const btn = el<HTMLButtonElement>(id);
-    btn.addEventListener("click", async () => {
-      btn.disabled = true; btn.textContent = `Simulating ${label}...`;
-      simMsg.textContent = `Simulating ${label}...`;
-      try {
-        await api("/webhooks/simulate", "POST", { event });
-        simMsg.textContent = `${label} simulated successfully!`;
-        showToast({ type: event } as any);
-      } catch (e) {
-        simMsg.textContent = (e as Error).message;
-      } finally {
-        btn.disabled = false; btn.textContent = label;
-      }
-    });
+// ---- Search ----
+searchInput.addEventListener("input", (e) => {
+  if (gridApi) {
+    gridApi.setGridOption("quickFilterText", (e.target as HTMLInputElement).value);
   }
+});
 
-  // Insights/Invoice simulator buttons
-  el<HTMLButtonElement>("simInsights").addEventListener("click", async () => {
-    const btn = el<HTMLButtonElement>("simInsights");
-    btn.disabled = true; btn.textContent = "Generating...";
-    try {
-      await api("/api/merchants/" + merchantId + "/insights", "GET");
-      showToast({ type: EventTypes.AGENT_INSIGHTS_GENERATED, count: 3 } as any);
-      loadInsights();
-    } catch (e) { simMsg.textContent = (e as Error).message; }
-    finally { btn.disabled = false; btn.textContent = "Generate Insights"; }
-  });
+refreshBtn.addEventListener("click", () => { lastJson = ""; load(); });
 
-  el<HTMLButtonElement>("simInvoice").addEventListener("click", async () => {
-    const btn = el<HTMLButtonElement>("simInvoice");
-    btn.disabled = true; btn.textContent = "Generating...";
-    try {
-      const payments = await api<PaymentDTO[]>(`/api/payments?merchantId=${merchantId}`);
-      const released = payments.find(p => p.state === "RELEASED");
-      if (!released) throw new Error("No released payments to invoice");
-      const lines = released.lines.map(l => ({ description: l.expr, quantity: 1, unitPriceCents: l.cents, totalCents: l.cents }));
-      await api("/api/invoices/generate", "POST", { paymentId: released.id, merchant: { id: merchantId, name: released.merchantName }, lineItems: lines, taxRate: 0.18 });
-      showToast({ type: EventTypes.AGENT_INVOICE_GENERATED, invoiceNumber: `INV-${Date.now()}` } as any);
-      loadInvoices();
-    } catch (e) { simMsg.textContent = (e as Error).message; }
-    finally { btn.disabled = false; btn.textContent = "Generate Invoice"; }
-  });
-}
-
-/** Payment card rendering (enhanced from merchant.ts) */
-function card(p: PaymentDTO): HTMLLIElement {
-  const li = document.createElement("li");
-  li.className = "card";
-  const info = STATE_INFO[p.state];
-  const head = document.createElement("div");
-  head.className = "card-head";
-  const badge = text("span", "badge", info.label);
-  badge.dataset.kind = info.kind;
-  head.append(text("strong", "", `${money(p.amountCents)} · ${p.merchantName}`), badge);
-  li.append(head, text("div", "ref", `${new Date(p.createdAt).toLocaleString()} · ${p.id.slice(0, 8)}`));
-
-  const lines = document.createElement("ol");
-  lines.className = "lines";
-  drawLines(lines, p.lines);
-  li.append(lines);
-
-  const act = (path: string, body?: unknown) => async () => {
-    msg.textContent = "";
-    try { await api(`/api/payments/${encodeURIComponent(p.id)}/${path}`, "POST", body); } catch (e) { msg.textContent = (e as Error).message; }
-    lastJson = ""; await load();
-  };
-
-  if (p.state === "HELD") li.append(button("Mark delivered", "pay", act("deliver")));
-  if (p.state === "FULFILLED") li.append(text("p", "hint", "Waiting for the customer to confirm."));
-  if (p.state === "DISPUTED" && p.dispute) {
-    const d = p.dispute;
-    li.append(text("p", "hint", `Customer claim: ${REASONS[d.reason] ?? d.reason}${d.note ? ` ("${d.note}")` : ""}`));
-    if (!d.shopStance) {
-      const stance = select({ delivered_ok: "I delivered, the claim is wrong", agrees_refund: "I agree to refund" });
-      const note = textarea("Your side (optional)");
-      li.append(stance, note, button("Send reply", "ghost", async () => act("respond", { stance: stance.value, note: note.value })()));
-    } else {
-      li.append(text("p", "hint", `Your reply: ${d.shopStance === "agrees_refund" ? "agree to refund" : "delivered"}${d.shopNote ? ` ("${d.shopNote}")` : ""}`));
-    }
-    if (!d.verdict) li.append(button("Ask the Tape Judges", "pay", act("judge")));
-  }
-  const verdict = document.createElement("div");
-  verdict.className = "verdict";
-  drawVerdict(verdict, p.dispute?.verdict);
-  li.append(verdict);
-
-  const facts = document.createElement("dl");
-  facts.className = "facts";
-  for (const [k, v] of [["Captured", p.captureId], ["Payout", p.payoutId], ["Refund", p.refundId]] as const) if (v) facts.append(text("dt", "", k), text("dd", "", v));
-  li.append(facts);
-
-  const det = document.createElement("details");
-  det.className = "audit";
-  det.append(text("summary", "", "Audit trail"));
-  const ol = document.createElement("ol");
-  drawAudit(ol, p.events);
-  det.append(ol);
-  li.append(det);
-  return li;
-}
-
-async function load() {
+// ---- Init ----
+async function init() {
   try {
-    const all = await api<PaymentDTO[]>(`/api/payments`);
-    const filter = stateFilter.value;
-    const shown = all.filter(p => {
-      if (filter && p.state !== filter) return false;
-      return p.state !== "CREATED" && p.state !== "CANCELLED";
-    });
-    const json = JSON.stringify(shown);
-    if (json === lastJson) return;
-    if (list.contains(document.activeElement) && document.activeElement instanceof HTMLTextAreaElement) return;
-    lastJson = json;
-    list.replaceChildren(...shown.map(card));
-    if (!shown.length) list.append(text("li", "hint", "No payments yet. Make one on the customer keypad."));
+    const shops = await api<{ id: string; name: string }[]>("/api/merchants");
+    const params = new URLSearchParams(location.search);
+    merchantId = params.get("shop") || shops[0]?.id || "shop1";
+    const shop = shops.find(s => s.id === merchantId);
+    shopName.textContent = shop?.name || "Unknown Shop";
+
+    initGrid();
+    startSSE();
+    loadInsights();
+    loadInvoices();
+    setupSimulator();
   } catch (e) {
     msg.textContent = (e as Error).message;
   }
 }
 
-// Expose functions for inline onclick
+// Global exports for inline handlers
 (window as any).generateInvoice = generateInvoice;
 (window as any).previewInvoice = previewInvoice;
 
-stateFilter.addEventListener("change", () => { lastJson = ""; load(); });
+stateFilter.addEventListener("change", () => load());
 void init();
 setInterval(load, 3000);
