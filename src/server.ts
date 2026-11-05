@@ -25,6 +25,7 @@ import { policyFromEnv } from "./referrals/rules";
 import { trustScore, statsFor } from "./trust/trust";
 import { broadcastEvent, registerSSEClient, unregisterSSEClient, EventTypes } from "./events/sse";
 import { buildSimulatedWebhook, processPayPalWebhook, emitAgentInsightsGenerated, emitAgentInvoiceGenerated, emitAgentReferralPaid, emitJudgeVerdict, emitPaymentStateChanged } from "./paypal/webhooks";
+import { WorkflowOrchestrator, makeOrchestrator, type OrchestratorDeps } from "./orchestrator/workflow";
 
 const CURRENCY = "USD";
 const MAX_PAYMENT_CENTS = 100_000; // 1,000.00 hard cap for now
@@ -77,6 +78,17 @@ export function buildApp(env: Record<string, string | undefined> = process.env, 
   const insightsClient = makeInsightsClient(env, warn);
   const invoiceClient = makeInvoiceClient(env, warn);
   const merchantClient = makeMerchantClient(env, warn);
+
+  // Workflow Orchestrator
+  const orchestrator = makeOrchestrator({
+    engine,
+    referrals,
+    insightsClient,
+    invoiceClient,
+    priceCheck,
+    merchants: MERCHANTS,
+    store,
+  });
 
   app.setErrorHandler((err: any, _req, reply) => {
     if (err.name === "ZodError") return reply.code(400).send({ error: "BAD_REQUEST", message: "Invalid request", issues: err.issues });
@@ -386,6 +398,13 @@ export function buildApp(env: Record<string, string | undefined> = process.env, 
     });
 
     return { simulated: true, webhook, result };
+  });
+
+  /** Workflow Orchestrator: Run full payment lifecycle. */
+  app.post("/api/payments/:id/auto-complete", async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const result = await orchestrator.runPaymentLifecycle(id);
+    return result;
   });
 
   return { app, store, pp, engine, referrals };

@@ -24,6 +24,7 @@ from .merchant_brain import MerchantBrain, ScriptedMerchantBrain, GeminiMerchant
 from .merchant_graph import build_merchant_graph, run_merchant
 from .merchant_models import MerchantFindRequest, MerchantFindResponse
 from .referral_api import build_router, make_referral_brain
+from .mesh import get_mesh, register_mesh_handlers, build_mesh_router, Topics
 
 log = logging.getLogger("agents")
 
@@ -59,6 +60,10 @@ def create_app(brain: Optional[Brain] = None, settings: Optional[Settings] = Non
             raise HTTPException(status_code=401, detail="Bad agents key")
 
     app.include_router(build_router(make_referral_brain(settings), guard))
+    app.include_router(build_mesh_router(get_mesh()))
+
+    # Register mesh handlers (subscribes to topics)
+    register_mesh_handlers(get_mesh())
 
     @app.get("/health")
     async def health() -> dict:
