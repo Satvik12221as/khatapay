@@ -9,5 +9,5 @@ export default defineConfig({
     },
   },
   // Two pages: the customer keypad and the merchant screen.
-  build: { rollupOptions: { input: ["index.html", "merchant.html"] } },
+  build: { rollupOptions: { input: ["index.html", "merchant.html", "merchant-dashboard.html"] } },
 });

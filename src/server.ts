@@ -23,6 +23,8 @@ import { ReferralService } from "./referrals/service";
 import { registerReferralRoutes } from "./referrals/routes";
 import { policyFromEnv } from "./referrals/rules";
 import { trustScore, statsFor } from "./trust/trust";
+import { broadcastEvent, registerSSEClient, unregisterSSEClient, EventTypes } from "./events/sse";
+import { buildSimulatedWebhook, processPayPalWebhook, emitAgentInsightsGenerated, emitAgentInvoiceGenerated, emitAgentReferralPaid, emitJudgeVerdict, emitPaymentStateChanged } from "./paypal/webhooks";
 
 const CURRENCY = "USD";
 const MAX_PAYMENT_CENTS = 100_000; // 1,000.00 hard cap for now
@@ -307,6 +309,83 @@ export function buildApp(env: Record<string, string | undefined> = process.env, 
     });
 
     return result;
+  });
+
+  /** Server-Sent Events for real-time agent updates. */
+  app.get("/api/events", async (req, reply) => {
+    const merchantId = (req.query as { merchantId?: string }).merchantId ?? "system";
+
+    reply.raw.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+
+    const encoder = new TextEncoder();
+    const send = (data: unknown) => {
+      reply.raw.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+    };
+
+    // Send initial connection event
+    send({ type: "CONNECTED", merchantId, timestamp: new Date().toISOString() });
+
+    // Register client
+    const controller = {
+      enqueue: (chunk: Uint8Array) => {
+        try { reply.raw.write(chunk); } catch { /* ignore */ }
+      }
+    } as ReadableStreamDefaultController<Uint8Array>;
+
+    registerSSEClient(merchantId, controller);
+
+    // Heartbeat
+    const heartbeatInterval = setInterval(() => {
+      send({ type: "HEARTBEAT", timestamp: new Date().toISOString() });
+    }, 30_000);
+
+    // Cleanup on close
+    req.raw.on("close", () => {
+      clearInterval(heartbeatInterval);
+      unregisterSSEClient(merchantId, controller);
+    });
+
+    // Keep connection open - don't call reply.send()
+    return reply;
+  });
+
+  /** PayPal Webhook Endpoint (for real PayPal webhooks). */
+  app.post("/webhooks/paypal", async (req, reply) => {
+    const event = req.body as any;
+    const result = await processPayPalWebhook(event, {
+      capture: async (id: string) => {
+        const payment = engine.get(id);
+        return engine.capture(payment.id);
+      },
+      payout: async (id: string) => { /* handled by referral service */ }
+    });
+    return result;
+  });
+
+  /** PayPal Webhook Simulator (for demo/testing). */
+  app.post("/webhooks/simulate", async (req, reply) => {
+    const body = z.object({
+      event: z.enum(["CAPTURE_COMPLETED", "PAYOUT_COMPLETED", "REFUND_COMPLETED", "DISPUTE_CREATED"]),
+      overrides: z.record(z.unknown()).optional(),
+    }).parse(req.body);
+
+    const webhook = buildSimulatedWebhook(body.event, body.overrides);
+
+    // Process the simulated event
+    const result = await processPayPalWebhook(webhook, {
+      capture: async (id: string) => {
+        const payment = engine.get(id);
+        return engine.capture(payment.id);
+      },
+      payout: async (id: string) => { /* handled by referral service */ }
+    });
+
+    return { simulated: true, webhook, result };
   });
 
   return { app, store, pp, engine, referrals };

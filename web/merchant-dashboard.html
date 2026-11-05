@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>KhataPay Merchant Dashboard</title>
+  <link rel="stylesheet" href="/web/style.css">
+</head>
+<body class="wide">
+  <main class="app">
+    <header class="top">
+      <span class="shop-sub">Merchant Dashboard</span>
+      <h1 class="shop-name" id="shopName">Loading...</h1>
+      <a class="link-inline" href="/">Customer keypad</a>
+    </header>
+
+    <!-- Real-time connection status -->
+    <div id="connectionStatus" class="refbanner" style="display:none;">
+      <span id="connBadge" class="chip" data-kind="wait">Connecting...</span>
+      <span id="connMsg" class="hint">Establishing live updates...</span>
+    </div>
+
+    <!-- Simulator Panel (visible in mock mode) -->
+    <section id="simulatorPanel" class="card" style="display:none;">
+      <h3 style="margin:0 0 12px;">PayPal Event Simulator</h3>
+      <p class="hint">Trigger simulated PayPal webhooks to test agent responses in real-time.</p>
+      <div style="display:flex; flex-wrap:wrap; gap:8px;">
+        <button type="button" class="pay" id="simCapture">Capture Completed</button>
+        <button type="button" class="ghost" id="simPayout">Payout Completed</button>
+        <button type="button" class="ghost" id="simRefund">Refund Completed</button>
+        <button type="button" class="ghost" id="simDispute">Dispute Created</button>
+        <button type="button" class="ghost" id="simInsights">Generate Insights</button>
+        <button type="button" class="ghost" id="simInvoice">Generate Invoice</button>
+      </div>
+      <p class="hint" id="simMsg"></p>
+    </section>
+
+    <!-- Insights Panel -->
+    <section id="insightsPanel" class="card" style="display:none;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 style="margin:0;">AI Insights</h3>
+        <button type="button" class="ghost" id="refreshInsights" style="font-size:13px;">Refresh</button>
+      </div>
+      <div id="insightsLoading" class="hint">Loading insights...</div>
+      <div id="insightsContent" style="display:none;"></div>
+    </section>
+
+    <!-- Invoices Panel -->
+    <section id="invoicesPanel" class="card" style="display:none;">
+      <h3 style="margin:0 0 12px;">Generated Invoices</h3>
+      <div id="invoicesLoading" class="hint">Loading invoices...</div>
+      <div id="invoicesContent" style="display:none;"></div>
+    </section>
+
+    <!-- Payments List -->
+    <section>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 style="margin:0;">Payments</h3>
+        <select id="stateFilter" class="field" style="width:auto;">
+          <option value="">All States</option>
+          <option value="HELD">Held</option>
+          <option value="FULFILLED">Fulfilled</option>
+          <option value="DISPUTED">Disputed</option>
+          <option value="RELEASED">Released</option>
+          <option value="REFUNDED">Refunded</option>
+        </select>
+      </div>
+      <p class="msg" id="mMsg" role="status"></p>
+      <ol class="cards" id="list"></ol>
+    </section>
+  </main>
+  <script type="module" src="/web/merchant-dashboard.ts"></script>
+</body>
+</html>

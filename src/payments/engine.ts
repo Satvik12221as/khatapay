@@ -4,6 +4,7 @@ import { IllegalTransition, next, type Action } from "./states";
 import { tapeHash } from "./tape";
 import type { Evidence } from "../judge/judges";
 import type { Panel } from "../agents/panel";
+import { emitPaymentStateChanged, emitJudgeVerdict } from "../paypal/webhooks";
 
 /** All money movement goes through here. Every step is validated, idempotent and logged. */
 export class PaymentEngine {
@@ -22,8 +23,11 @@ export class PaymentEngine {
   /** Re-reads the payment so two quick clicks can never apply the same step twice. */
   private move(id: string, action: Action, actor: string, patch: Partial<Payment> = {}, detail?: string, ref?: string): Payment {
     const cur = this.get(id);
+    const from = cur.state;
     const to = next(cur.state, action);
-    return this.store.update(id, { ...patch, state: to, events: [...cur.events, this.ev(cur, action, to, actor, detail, ref)] });
+    const updated = this.store.update(id, { ...patch, state: to, events: [...cur.events, this.ev(cur, action, to, actor, detail, ref)] });
+    emitPaymentStateChanged(id, from, to);
+    return updated;
   }
 
   create(p: Omit<Payment, "events" | "state">): Payment {
@@ -106,6 +110,7 @@ export class PaymentEngine {
       ? await this.panel.run(evidence)
       : { votes: [], outcome: "refund" as const, note: "Tape fingerprint mismatch: refunded without a vote." };
     this.store.update(id, { dispute: { ...d, verdict } });
+    emitJudgeVerdict(id, verdict.outcome);
     const detail = `Verdict: ${verdict.outcome}`;
     if (verdict.outcome === "release") {
       const po = await this.payShop(p);
