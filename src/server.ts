@@ -14,6 +14,7 @@ import { discountKeys } from "./haggle/haggle";
 import { makeNegotiator, type Negotiator } from "./agents/negotiator";
 import { makePanel, type Panel } from "./agents/panel";
 import { makeRecommender } from "./agents/recommender";
+import { ScriptedPriceBrain } from "./agents/pricecheck_local";
 import { ReferralStore } from "./referrals/store";
 import { ReferralService } from "./referrals/service";
 import { registerReferralRoutes } from "./referrals/routes";
@@ -55,6 +56,16 @@ export function buildApp(env: Record<string, string | undefined> = process.env, 
     const m = MERCHANTS.find((x) => x.id === id);
     if (!m) throw Object.assign(new Error("Unknown shop"), { statusCode: 404 });
     return m;
+  };
+
+  const priceCheck = (req: { merchantId: string; lines: { expr: string; cents: number }[] }, typicalCents: number | null) => {
+    return ScriptedPriceBrain(typicalCents)({
+      merchantName: merchant(req.merchantId).name,
+      totalCents: req.lines.reduce((a, l) => a + l.cents, 0),
+      lines: req.lines,
+      category: merchant(req.merchantId).category,
+      area: merchant(req.merchantId).area,
+    });
   };
 
   app.setErrorHandler((err: any, _req, reply) => {
@@ -155,7 +166,18 @@ export function buildApp(env: Record<string, string | undefined> = process.env, 
     return { ...out, keys: finalKeys, totalBeforeCents: view.totalCents, totalAfterCents: after.totalCents };
   });
 
-    return { app, store, pp, engine, referrals };
+  /** Price-check: compare bill against pricebook and typical spend. */
+  app.post("/api/pricecheck", async (req, reply) => {
+    if (!aiAllowed()) return reply.code(429).send({ error: "RATE_LIMIT", message: "Too many AI requests, try again later" });
+    const body = z.object({
+      merchantId: z.string(),
+      lines: z.array(z.object({ expr: z.string(), cents: z.number().int().min(0) })),
+    }).parse(req.body);
+    const m = merchant(body.merchantId);
+    return priceCheck(body, m.typicalCents);
+  });
+
+  return { app, store, pp, engine, referrals };
 }
 
 // Start the server only when this file is run directly (not when imported by tests)

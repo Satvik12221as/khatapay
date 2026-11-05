@@ -6,10 +6,14 @@ from typing import Optional
 from fastapi import Depends, FastAPI, Header, HTTPException
 
 from .brains import Brain, GeminiBrain, ResilientBrain, ScriptedBrain
+from .pricecheck_brain import PriceBrain
 from .config import Settings
 from .haggle_graph import build_haggle_graph, run_haggle
 from .judge_graph import build_judge_graph, run_judge
 from .models import Evidence, HaggleRequest, HaggleResponse, JudgeResponse
+from .pricecheck_brain import ScriptedPriceBrain, GeminiPriceBrain, ResilientPriceBrain
+from .pricecheck_graph import build_pricecheck_graph, run_pricecheck
+from .pricecheck_models import PriceCheckRequest, PriceCheckResponse
 from .referral_api import build_router, make_referral_brain
 
 log = logging.getLogger("agents")
@@ -24,11 +28,21 @@ def make_brain(settings: Settings) -> Brain:
                           on_error=lambda e: log.warning("Gemini failed, using offline agent: %s", e))
 
 
+def make_price_brain(settings: Settings) -> "PriceBrain":
+    scripted = ScriptedPriceBrain()
+    if not settings.gemini_api_key:
+        return scripted
+    return ResilientPriceBrain(GeminiPriceBrain(settings.gemini_api_key, settings.gemini_model), scripted,
+                               on_error=lambda e: log.warning("Gemini price-check failed, using scripted: %s", e))
+
+
 def create_app(brain: Optional[Brain] = None, settings: Optional[Settings] = None) -> FastAPI:
     settings = settings or Settings.from_env()
     brain = brain or make_brain(settings)
+    price_brain = make_price_brain(settings)
     haggle_graph = build_haggle_graph(brain)
     judge_graph = build_judge_graph(brain)
+    pricecheck_graph = build_pricecheck_graph(price_brain)
     app = FastAPI(title="KhataPay agents")
 
     def guard(x_agents_key: Optional[str] = Header(default=None)) -> None:
@@ -36,7 +50,7 @@ def create_app(brain: Optional[Brain] = None, settings: Optional[Settings] = Non
             raise HTTPException(status_code=401, detail="Bad agents key")
 
     app.include_router(build_router(make_referral_brain(settings), guard))
-    
+
     @app.get("/health")
     async def health() -> dict:
         return {"ok": True, "llm": "gemini" if settings.gemini_api_key else "scripted", "framework": "langgraph"}
@@ -48,6 +62,10 @@ def create_app(brain: Optional[Brain] = None, settings: Optional[Settings] = Non
     @app.post("/judge", response_model=JudgeResponse, dependencies=[Depends(guard)])
     async def judge(ev: Evidence) -> JudgeResponse:
         return await run_judge(judge_graph, ev)
+
+    @app.post("/pricecheck", response_model=PriceCheckResponse, dependencies=[Depends(guard)])
+    async def pricecheck(req: PriceCheckRequest) -> PriceCheckResponse:
+        return await run_pricecheck(pricecheck_graph, req)
 
     return app
 
