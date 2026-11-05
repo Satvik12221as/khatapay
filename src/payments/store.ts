@@ -31,9 +31,16 @@ export interface Payment {
   events: AuditEvent[];
 }
 
+export interface PaymentLink {
+  paymentId: string;
+  customerId: string;
+  merchantId: string;
+}
+
 /** Keeps payments in memory and (optionally) in a JSON file so a restart does not lose them */
 export class PaymentStore {
   private m = new Map<string, Payment>();
+  private links = new Map<string, PaymentLink>();
   constructor(private file?: string) {
     if (file && existsSync(file)) {
       try { for (const p of JSON.parse(readFileSync(file, "utf8")) as Payment[]) this.m.set(p.id, p); } catch { /* ignore a corrupt file */ }
@@ -54,4 +61,8 @@ export class PaymentStore {
     this.save();
     return p;
   }
+  link(paymentId: string, customerId: string, merchantId: string) {
+    this.links.set(paymentId, { paymentId, customerId, merchantId });
+  }
+  linkOf(paymentId: string) { return this.links.get(paymentId); }
 }

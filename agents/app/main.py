@@ -14,6 +14,15 @@ from .models import Evidence, HaggleRequest, HaggleResponse, JudgeResponse
 from .pricecheck_brain import ScriptedPriceBrain, GeminiPriceBrain, ResilientPriceBrain
 from .pricecheck_graph import build_pricecheck_graph, run_pricecheck
 from .pricecheck_models import PriceCheckRequest, PriceCheckResponse
+from .insights_brain import InsightsBrain, ScriptedInsightsBrain, GeminiInsightsBrain, ResilientInsightsBrain
+from .insights_graph import build_insights_graph, run_insights
+from .insights_models import InsightsRequest, InsightsResponse
+from .invoice_brain import InvoiceBrain, ScriptedInvoiceBrain, GeminiInvoiceBrain, ResilientInvoiceBrain
+from .invoice_graph import build_invoice_graph, run_invoice
+from .invoice_models import InvoiceRequest, InvoiceResponse
+from .merchant_brain import MerchantBrain, ScriptedMerchantBrain, GeminiMerchantBrain, ResilientMerchantBrain
+from .merchant_graph import build_merchant_graph, run_merchant
+from .merchant_models import MerchantFindRequest, MerchantFindResponse
 from .referral_api import build_router, make_referral_brain
 
 log = logging.getLogger("agents")
@@ -66,6 +75,51 @@ def create_app(brain: Optional[Brain] = None, settings: Optional[Settings] = Non
     @app.post("/pricecheck", response_model=PriceCheckResponse, dependencies=[Depends(guard)])
     async def pricecheck(req: PriceCheckRequest) -> PriceCheckResponse:
         return await run_pricecheck(pricecheck_graph, req)
+
+    @app.post("/insights", response_model=InsightsResponse, dependencies=[Depends(guard)])
+    async def insights(req: InsightsRequest) -> InsightsResponse:
+        # Build insights brain with same resilience pattern
+        scripted = ScriptedInsightsBrain()
+        if not settings.gemini_api_key:
+            insights_brain = scripted
+        else:
+            insights_brain = ResilientInsightsBrain(
+                GeminiInsightsBrain(settings.gemini_api_key, settings.gemini_model),
+                scripted,
+                on_error=lambda e: log.warning("Gemini insights failed, using offline: %s", e)
+            )
+        insights_graph = build_insights_graph(insights_brain)
+        return await run_insights(insights_graph, req)
+
+    @app.post("/invoice", response_model=InvoiceResponse, dependencies=[Depends(guard)])
+    async def invoice(req: InvoiceRequest) -> InvoiceResponse:
+        # Build invoice brain with same resilience pattern
+        scripted = ScriptedInvoiceBrain()
+        if not settings.gemini_api_key:
+            invoice_brain = scripted
+        else:
+            invoice_brain = ResilientInvoiceBrain(
+                GeminiInvoiceBrain(settings.gemini_api_key, settings.gemini_model),
+                scripted,
+                on_error=lambda e: log.warning("Gemini invoice failed, using offline: %s", e)
+            )
+        invoice_graph = build_invoice_graph(invoice_brain)
+        return await run_invoice(invoice_graph, req)
+
+    @app.post("/merchant/find", response_model=MerchantFindResponse, dependencies=[Depends(guard)])
+    async def merchant_find(req: MerchantFindRequest) -> MerchantFindResponse:
+        # Build merchant brain with same resilience pattern
+        scripted = ScriptedMerchantBrain()
+        if not settings.gemini_api_key:
+            merchant_brain = scripted
+        else:
+            merchant_brain = ResilientMerchantBrain(
+                GeminiMerchantBrain(settings.gemini_api_key, settings.gemini_model),
+                scripted,
+                on_error=lambda e: log.warning("Gemini merchant finder failed, using offline: %s", e)
+            )
+        merchant_graph = build_merchant_graph(merchant_brain)
+        return await run_merchant(merchant_graph, req)
 
     return app
 
