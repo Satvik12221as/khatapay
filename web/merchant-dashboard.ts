@@ -196,7 +196,7 @@ function startSSE() {
 
 function handleSSEEvent(event: { type: string; [key: string]: unknown }) {
   showToast(event);
-  if ([
+  const eventTypes = [
     EventTypes.AGENT_INSIGHTS_GENERATED,
     EventTypes.AGENT_INVOICE_GENERATED,
     EventTypes.AGENT_REFERRAL_PAID,
@@ -206,7 +206,8 @@ function handleSSEEvent(event: { type: string; [key: string]: unknown }) {
     EventTypes.PAYMENT_CAPTURE_COMPLETED,
     EventTypes.PAYOUT_COMPLETED,
     EventTypes.REFUND_COMPLETED,
-  ].includes(event.type)) {
+  ];
+  if (eventTypes.includes(event.type as typeof eventTypes[number])) {
     load();
   }
 }
@@ -265,6 +266,89 @@ function onRowDoubleClicked(event: any) {
   showPaymentDetail(p);
 }
 
+function showReasoningTrace(p: PaymentDTO, parentModal: HTMLDialogElement) {
+  const traceModal = document.createElement("dialog");
+  traceModal.className = "sheet wide";
+  traceModal.style.maxWidth = "800px";
+  traceModal.style.maxHeight = "90vh";
+
+  const traceContent = document.createElement("div");
+  traceContent.style.maxHeight = "600px";
+  traceContent.style.overflow = "auto";
+  traceContent.style.fontSize = "12px";
+  traceContent.style.fontFamily = "ui-monospace, Consolas, monospace";
+
+  // Extract trace from payment events
+  const traceEvents = p.events?.filter(e =>
+    e.event.includes("AGENT") ||
+    e.event.includes("JUDGE") ||
+    e.event.includes("CAPTURE") ||
+    e.event.includes("PAYOUT") ||
+    e.event.includes("REFUND") ||
+    e.event.includes("INSIGHT") ||
+    e.event.includes("INVOICE") ||
+    e.event.includes("REFERRAL") ||
+    e.event.includes("HAGGLE") ||
+    e.event.includes("PRICE")
+  ) || [];
+
+  if (traceEvents.length === 0) {
+    traceContent.innerHTML = `<p class="hint" style="padding: 20px; text-align: center;">No AI reasoning trace available for this payment.</p>`;
+  } else {
+    const traceHtml = traceEvents.map((e, i) => {
+      const time = new Date(e.at).toLocaleTimeString();
+      const actorEmoji = e.actor === "customer" ? "👤" : e.actor === "shop" ? "🏪" : e.actor === "judges" ? "⚖️" : e.actor === "agents" ? "🤖" : "⚙️";
+      const eventType = e.event.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+
+      return `
+        <div style="border-left: 3px solid var(--pay); padding: 12px; margin: 8px 0; background: var(--paper); border-radius: 8px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 18px;">${actorEmoji}</span>
+              <strong style="color: var(--ink);">${eventType}</strong>
+              <span class="chip" data-kind="${e.actor === 'judges' ? 'ok' : e.actor === 'agents' ? 'wait' : 'neutral'}">${e.actor.toUpperCase()}</span>
+            </div>
+            <span style="color: var(--muted); font-size: 11px;">${time}</span>
+          </div>
+          ${e.detail ? `<div style="color: var(--muted); font-size: 12px; margin-bottom: 4px;">${e.detail}</div>` : ""}
+          ${e.ref ? `<div style="color: var(--muted); font-size: 11px; font-family: ui-monospace, monospace;">Ref: ${e.ref}</div>` : ""}
+          ${e.from && e.to ? `<div style="display: flex; align-items: center; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line);">
+            <span style="color: var(--bad);">${e.from || "START"}</span>
+            <span style="color: var(--muted);">→</span>
+            <span style="color: var(--pay); font-weight: 600;">${e.to}</span>
+          </div>` : ""}
+        </div>
+      `;
+    }).join("");
+
+    traceContent.innerHTML = `
+      <div style="margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--line);">
+        <h2 style="margin: 0 0 4px; color: var(--ink);">🧠 AI Reasoning Trace</h2>
+        <p class="hint" style="margin: 0;">${traceEvents.length} agent events recorded</p>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        ${traceHtml}
+      </div>
+    `;
+  }
+
+  const reasoningModal = document.createElement("dialog");
+  reasoningModal.className = "sheet wide";
+  reasoningModal.style.maxWidth = "800px";
+  reasoningModal.style.maxHeight = "90vh";
+
+  reasoningModal.innerHTML = `
+    <h2 style="margin: 0 0 16px;">🧠 AI Reasoning Trace</h2>
+    <p class="hint" style="margin-bottom: 16px;">Complete trace of AI agent decisions for this payment</p>
+  `;
+  reasoningModal.appendChild(traceContent);
+  reasoningModal.appendChild(document.createElement("hr"));
+  reasoningModal.appendChild(button("Close", "ghost", () => reasoningModal.close()));
+
+  document.body.appendChild(reasoningModal);
+  reasoningModal.showModal();
+}
+
 function showPaymentDetail(p: PaymentDTO) {
   const info = STATE_INFO[p.state];
   const modal = document.createElement("dialog");
@@ -292,6 +376,9 @@ function showPaymentDetail(p: PaymentDTO) {
   actionsDiv.style.gap = "8px";
   actionsDiv.style.marginTop = "16px";
 
+  // AI Reasoning Viewer button
+  const traceBtn = button("🧠 View AI Reasoning", "ghost", () => showReasoningTrace(p, modal));
+
   const makeAction = (label: string, path: string, body?: unknown, cls = "pay") => {
     const btn = button(label, cls, async () => {
       try { await api(`/api/payments/${encodeURIComponent(p.id)}/${path}`, "POST", body); } catch (e) { msg.textContent = (e as Error).message; }
@@ -300,6 +387,8 @@ function showPaymentDetail(p: PaymentDTO) {
     });
     return btn;
   };
+
+  actionsDiv.prepend(traceBtn);
 
   if (p.state === "HELD") actionsDiv.append(makeAction("Mark delivered", "deliver"));
   if (p.state === "FULFILLED") actionsDiv.append(document.createTextNode("Waiting for the customer to confirm."));
@@ -327,17 +416,20 @@ function showPaymentDetail(p: PaymentDTO) {
   det.append(text("summary", "", "Audit trail"));
   const ol = document.createElement("ol");
 
-  modal.append(
-    document.createElement("h2").append(document.createTextNode(`${money(p.amountCents)} · ${p.merchantName}`), badge),
-    document.createElement("div").append(document.createTextNode(`${new Date(p.createdAt).toLocaleString()} · ${p.id.slice(0, 8)}`)),
-    lines,
-    document.createElement("hr"),
-    actionsDiv,
-    verdict,
-    facts,
-    det,
-    button("Close", "ghost", () => modal.close())
-  );
+  const titleEl = (() => { const h2 = document.createElement("h2"); h2.append(document.createTextNode(`${money(p.amountCents)} · ${p.merchantName}`), badge); return h2; })();
+    const dateEl = (() => { const div = document.createElement("div"); div.append(document.createTextNode(`${new Date(p.createdAt).toLocaleString()} · ${p.id.slice(0, 8)}`)); return div; })();
+
+    modal.append(
+      titleEl,
+      dateEl,
+      lines,
+      document.createElement("hr"),
+      actionsDiv,
+      verdict,
+      facts,
+      det,
+      button("Close", "ghost", () => modal.close())
+    );
 
   document.body.appendChild(modal);
   modal.showModal();
