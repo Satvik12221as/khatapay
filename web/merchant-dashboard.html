@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>KhataPay Merchant Dashboard</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#2b3a8c">
   <link rel="stylesheet" href="/web/style.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@36.3.0/styles/ag-grid.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@36.3.0/styles/ag-theme-alpine.css">
@@ -76,5 +78,10 @@
     </section>
   </main>
   <script type="module" src="/web/merchant-dashboard.ts"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(console.error);
+    }
+  </script>
 </body>
 </html>

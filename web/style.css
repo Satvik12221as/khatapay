@@ -9,7 +9,22 @@
   --op-ink: #7a4a00;
   --pay: #2b3a8c;
   --bad: #b3261e;
-  color-scheme: light;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1419;
+    --ink: #e8edf2;
+    --muted: #8b9cc0;
+    --paper: #161b22;
+    --line: #2d3d4f;
+    --key: #1f2a3a;
+    --op: #2d2a00;
+    --op-ink: #fbe3b4;
+    --pay: #5b7bff;
+    --bad: #ff6b6b;
+  }
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }

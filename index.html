@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>KhataPay</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#2b3a8c">
   <link rel="stylesheet" href="/web/style.css">
 </head>
 <body>
@@ -102,5 +104,10 @@
   <div class="sheet-actions"><button class="ghost" id="referClose" type="button">Close</button></div>
   </dialog>
   <script type="module" src="/web/main.ts"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(console.error);
+    }
+  </script>
 </body>
 </html>
